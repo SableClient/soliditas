@@ -119,7 +119,7 @@ describe('proxyMediaCall', () => {
 
 			expect(body).not.toContain(`https://static.klipy.com/ii/klipy_${klipyPath}`);
 		});
-        it('creates a valid multipart redirect response for tenor', async () => {
+        it('creates a valid multipart redirect response for klipy', async () => {
             const klipyPath = 'ffd4ac143e6335ac68951b787d3c1902/e8/3a/5LM0jRpL.gif';
 			const response = await proxyMediaCall(mxcId.toMatrixID(klipyPath, 'klipy_'));
 			expect(response.status).toBe(200);
