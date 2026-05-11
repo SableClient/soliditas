@@ -41,21 +41,42 @@ function decodeMatrixId(rawId: string): string | MatrixError {
 
 	return id;
 }
+type MultipartPartLike = {
+	headers: HeadersInit;
+	body?: BodyInit;
+};
+
+function encodeMultipart(boundary: string, parts: MultipartPartLike[]): string {
+	const lines: string[] = [];
+
+	for (const part of parts) {
+		lines.push(`--${boundary}`);
+		for (const [key, value] of Object.entries(part.headers)) {
+			lines.push(`${key}: ${value}`);
+		}
+		lines.push('');
+		lines.push(part.body ? String(part.body) : '');
+	}
+
+	lines.push(`--${boundary}--`, '');
+	return lines.join('\r\n');
+}
+
 function buildMultipartRedirect(targetLocation: string): Response {
 	const boundary = `soliditas${Date.now().toString(16)}${Math.random().toString(16).slice(2)}`;
-	const body = Buffer.from(
-		`--${boundary}\r\n` +
-			`Content-Type: application/json\r\n` +
-			`\r\n` +
-			`{}\r\n` +
-			`--${boundary}\r\n` +
-			`Content-Type: application/octet-stream\r\n` +
-			`Location: ${targetLocation}\r\n` +
-			`\r\n` +
-			`\r\n` +
-			`--${boundary}--\r\n`,
-		'utf8'
-	);
+
+	const body = encodeMultipart(boundary, [
+		{
+			headers: { 'Content-Type': 'application/json' },
+			body: '{}',
+		},
+		{
+			headers: {
+				'Content-Type': 'application/octet-stream',
+				'Location': targetLocation,
+			},
+		},
+	]);
 
 	return new Response(body, {
 		headers: {

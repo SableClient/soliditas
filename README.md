@@ -13,22 +13,14 @@ Example in TypeScript, as seen in `mxcId.ts`:
 
 ```typescript
 function toBase64Url(value: string): string {
-  if (typeof btoa === 'function') {
-    const bytes = new TextEncoder().encode(value);
-    let binary = '';
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
 
-    for (const byte of bytes) {
-      binary += String.fromCodePoint(byte);
-    }
-
-    return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll(/=+$/g, '');
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
   }
 
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(value).toString('base64url');
-  }
-
-  throw new Error('No base64 encoder available in this runtime');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll(/=+$/g, '');
 }
 
 function toMatrixID(fname: string, prefix: string): string {

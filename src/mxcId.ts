@@ -23,22 +23,14 @@
  * @return {*}  {string} the url-safe-base64 encoded string
  */
 function toBase64Url(value: string): string {
-  if (typeof btoa === 'function') {
-    const bytes = new TextEncoder().encode(value);
-    let binary = '';
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
 
-    for (const byte of bytes) {
-      binary += String.fromCodePoint(byte);
-    }
-
-    return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll(/=+$/g, '');
+  for (const byte of bytes) {
+    binary += String.fromCodePoint(byte);
   }
 
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(value).toString('base64url');
-  }
-
-  throw new Error('No base64 encoder available in this runtime');
+  return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll(/=+$/g, '');
 }
 
 /**
@@ -48,19 +40,11 @@ function toBase64Url(value: string): string {
  * @return {*}  {string} the usable string
  */
 function fromBase64Url(value: string): string {
-  if (typeof atob === 'function') {
-    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
-    const binary = atob(padded);
-    const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  }
-
-  if (typeof Buffer !== 'undefined') {
-    return Buffer.from(value, 'base64url').toString();
-  }
-
-  throw new Error('No base64 decoder available in this runtime');
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
 }
 
 /**
