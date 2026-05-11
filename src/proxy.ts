@@ -42,8 +42,8 @@ function decodeMatrixId(rawId: string): string | MatrixError {
 	return id;
 }
 type MultipartPartLike = {
-	headers: Headers;
-	body?: BodyInit | null;
+	headers: HeadersInit;
+	body?: BodyInit;
 };
 
 function encodeMultipart(boundary: string, parts: MultipartPartLike[]): string {
@@ -55,9 +55,7 @@ function encodeMultipart(boundary: string, parts: MultipartPartLike[]): string {
 			lines.push(`${key}: ${value}`);
 		}
 		lines.push('');
-		if (typeof part.body === 'string') {
-			lines.push(part.body);
-		}
+		lines.push(part.body ? String(part.body) : '');
 	}
 
 	lines.push(`--${boundary}--`, '');
@@ -69,14 +67,14 @@ function buildMultipartRedirect(targetLocation: string): Response {
 
 	const body = encodeMultipart(boundary, [
 		{
-			headers: new Headers({ 'Content-Type': 'application/json' }),
+			headers: { 'Content-Type': 'application/json' },
 			body: '{}',
 		},
 		{
-			headers: new Headers({
+			headers: {
 				'Content-Type': 'application/octet-stream',
-				Location: targetLocation,
-			}),
+				'Location': targetLocation,
+			},
 		},
 	]);
 
