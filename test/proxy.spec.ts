@@ -28,9 +28,16 @@ describe('proxyMediaCall', () => {
 			// to ensure it has the Location part needed for forwarding
 			expect(body).toContain('Location:');
 
-			expect(body).toContain('https://i.giphy.com/yXPquATCb8kGk.webp');
+			expect(body).toContain('https://i.giphy.com/yXPquATCb8kGk.gif');
 
-			expect(body).not.toContain('https://i.giphy.com/giphy_yXPquATCb8kGk.webp');
+			expect(body).not.toContain('https://i.giphy.com/giphy_yXPquATCb8kGk.gif');
+		});
+		it('keeps the extension the id carries, and defaults to gif without one', async () => {
+			const withFormat = await proxyMediaCall('giphy_eVhQcXVBVENiOGtHay53ZWJw');
+			expect(await withFormat.text()).toContain('https://i.giphy.com/yXPquATCb8kGk.webp');
+
+			const withoutFormat = await proxyMediaCall('giphy_eVhQcXVBVENiOGtHaw');
+			expect(await withoutFormat.text()).toContain('https://i.giphy.com/yXPquATCb8kGk.gif');
 		});
 		it('creates a valid multipart redirect response for giphy', async () => {
 			const response = await proxyMediaCall('giphy_eVhQcXVBVENiOGtHaw');
@@ -50,7 +57,7 @@ describe('proxyMediaCall', () => {
 				`{}\r\n` +
 				`--${boundary}\r\n` +
 				`Content-Type: application/octet-stream\r\n` +
-				`Location: https://i.giphy.com/yXPquATCb8kGk.webp\r\n` +
+				`Location: https://i.giphy.com/yXPquATCb8kGk.gif\r\n` +
 				`\r\n` +
 				`\r\n` +
 				`--${boundary}--\r\n`;

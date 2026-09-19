@@ -89,13 +89,14 @@ function buildMultipartRedirect(targetLocation: string): Response {
 
 /**
  * proxy a giphy call
- * example id: yXPquATCb8kGk
+ * example id: yXPquATCb8kGk.gif
  *
- * @param {string} id the id of the giphy media
+ * @param {string} id the id of the giphy media, with the extension giphy picks the format from
  * @return {*}  {Response} the multipart response to return to the requesting homeserver
  */
 function proxyGiphy(id: string): Response {
-	return buildMultipartRedirect(`https://i.giphy.com/${id}.webp`);
+	const file = /\.[a-z0-9]+$/i.test(id) ? id : `${id}.gif`;
+	return buildMultipartRedirect(`https://i.giphy.com/${file}`);
 }
 
 function proxyTenor(id: string): Response {
