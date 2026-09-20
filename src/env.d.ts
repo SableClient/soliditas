@@ -1,5 +1,5 @@
 export interface Env {
-  HOSTNAME: string;
-  SERVERNAME: string;
-  PORT: number;
+  HOSTNAME?: string;
+  SERVERNAME?: string;
+  PORT?: number;
 }
