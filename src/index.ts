@@ -27,6 +27,8 @@ export default {
 		SERVERNAME: any; HOSTNAME: any; PORT: any; 
 }, context: any) {
 		const url = new URL(request.url);
+		const serverName = env.SERVERNAME || url.hostname;
+		const delegate = `${env.HOSTNAME || url.hostname}:${env.PORT || url.port || 443}`;
 
 		if (url.pathname === '/_matrix/federation/v1/version') {
 			return new Response(JSON.stringify(returnMatrixServerVers()), {
@@ -47,7 +49,7 @@ export default {
 				})
 			}
 			const matrixId = toMatrixID(remoteId, `${remoteType}_`)
-			const mxcUrl = `mxc://${env.SERVERNAME}/${matrixId}`
+			const mxcUrl = `mxc://${serverName}/${matrixId}`
 			return new Response(JSON.stringify({
 				remoteType,
 				remoteId,
@@ -55,7 +57,9 @@ export default {
 				mxcId: matrixId
 			} satisfies SoliditasAddressConvertResponse))
 		} else if (url.pathname === '/.well-known/matrix/server') {
-			return new Response(JSON.stringify({ 'm.server': `${env.HOSTNAME}:${env.PORT}` } satisfies MatrixWellKnownServer));
+			return new Response(JSON.stringify({ 'm.server': delegate } satisfies MatrixWellKnownServer), {
+				headers: { 'Content-Type': 'application/json' },
+			});
 		} else {
 			return new Response(JSON.stringify(matrixEndpointNotImplemented('only implements media endpoints')), {
 				headers: { 'Content-Type': 'application/json' },
