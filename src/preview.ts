@@ -19,7 +19,7 @@
 import { matrixInvalidParam, matrixRessourceNotFound } from './matrixError';
 import { toMatrixID } from './mxcId';
 
-const USER_AGENT = 'Mozilla/5.0 (compatible; SoliditasBot/1.0; +https://github.com/SableClient/soliditas) facebookexternalhit/1.1';
+const USER_AGENT = 'Soliditas (bot; +https://github.com/SableClient/soliditas) facebookexternalhit/1.1';
 
 const CORS_HEADERS = {
 	'Content-Type': 'application/json',
@@ -28,6 +28,9 @@ const CORS_HEADERS = {
 
 const TWITTER_HOSTS = /^(?:www\.|mobile\.)?(?:twitter|x|fxtwitter|fixupx|vxtwitter|fixvx)\.com$/;
 const TWITTER_STATUS = /^\/(?:[^/]+|i\/web)\/status(?:es)?\/(\d+)/;
+
+const TUMBLR_BLOG_POST = /^([a-z\d-]+)\.tumblr\.com$/;
+const TUMBLR_DASHBOARD_POST = /^\/([a-z\d-]+)\/(\d+)/;
 
 const OEMBED_ENDPOINTS: [RegExp, string][] = [
 	[/(?:^|\.)reddit\.com$/, 'https://www.reddit.com/oembed'],
@@ -45,6 +48,11 @@ type OEmbed = {
 	thumbnail_url?: string;
 	thumbnail_width?: number;
 	thumbnail_height?: number;
+};
+
+type ActivityNote = {
+	sensitive?: boolean;
+	attachment?: { mediaType?: string; url?: string; width?: number; height?: number }[];
 };
 
 type FxMedia = { url?: string; thumbnail_url?: string; width?: number; height?: number };
@@ -94,11 +102,12 @@ function setTag(tags: Tags, key: string, value: string | number | undefined): vo
 	tags[key] = String(value);
 }
 
-async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string }> {
+async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string; misskeyNote: boolean }> {
 	const tags: Tags = {};
 	const fallback: Tags = {};
 	let title = '';
 	let oembed: string | undefined;
+	let misskeyNote = false;
 
 	await new HTMLRewriter()
 		.on('meta', {
@@ -107,6 +116,7 @@ async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string }
 				const raw = element.getAttribute('content');
 				const content = raw && decodeEntities(raw).trim();
 				if (!key || !content) return;
+				if (key === 'misskey:note-id') misskeyNote = true;
 				if (key.startsWith('og:')) setTag(tags, key, content);
 				else if (key.startsWith('twitter:') || key === 'description') setTag(fallback, key, content);
 			},
@@ -128,7 +138,19 @@ async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string }
 	setTag(tags, 'og:title', fallback['twitter:title'] ?? decodeEntities(title).trim());
 	setTag(tags, 'og:description', fallback['twitter:description'] ?? fallback['description']);
 	setTag(tags, 'og:image', fallback['twitter:image'] ?? fallback['twitter:image:src']);
-	return { tags, oembed };
+	return { tags, oembed, misskeyNote };
+}
+
+async function mergeNoteAttachment(tags: Tags, url: URL): Promise<void> {
+	const response = await fetchPublic(url, 'application/activity+json');
+	const note = response ? ((await response.json().catch(() => null)) as ActivityNote | null) : null;
+	const image = note?.sensitive ? undefined : note?.attachment?.find((file) => file.mediaType?.startsWith('image/') && file.url);
+	if (!image?.url) return;
+	tags['og:image'] = image.url;
+	delete tags['og:image:width'];
+	delete tags['og:image:height'];
+	setTag(tags, 'og:image:width', image.width);
+	setTag(tags, 'og:image:height', image.height);
 }
 
 function mergeOEmbed(tags: Tags, oembed: OEmbed, authoritative: boolean): void {
@@ -184,8 +206,32 @@ async function previewPage(url: URL): Promise<Tags | null> {
 		const found = discovered ? await fetchJson<OEmbed>(discovered) : null;
 		if (found) mergeOEmbed(tags, found, false);
 	}
+	if (html?.misskeyNote) await mergeNoteAttachment(tags, url);
 
-	if (tags['og:image']) tags['og:image'] = parsePublicUrl(tags['og:image'], base)?.href ?? '';
+	if (tags['og:image']) {
+		const image = parsePublicUrl(tags['og:image'], base);
+		tags['og:image'] = image && image.pathname !== '/' ? image.href : '';
+	}
+	return tags;
+}
+
+function tumblrPost(url: URL): string | null {
+	const blog = TUMBLR_BLOG_POST.exec(url.hostname)?.[1];
+	if (blog && blog !== 'www') {
+		const id = /^\/post\/(\d+)/.exec(url.pathname)?.[1];
+		return id ? `${blog}/${id}` : null;
+	}
+	if (!/^(?:www\.)?tumblr\.com$/.test(url.hostname)) return null;
+	const [, dashboardBlog, id] = TUMBLR_DASHBOARD_POST.exec(url.pathname) ?? [];
+	return id ? `${dashboardBlog}/${id}` : null;
+}
+
+async function previewTumblr(url: URL, post: string): Promise<Tags | null> {
+	const [tags, fxtumblr] = await Promise.all([previewPage(url), previewPage(new URL(`https://tpmblr.com/${post}`))]);
+	if (!tags || tags['og:image'] || !fxtumblr?.['og:image']) return tags ?? fxtumblr;
+	tags['og:image'] = fxtumblr['og:image'];
+	delete tags['og:image:width'];
+	delete tags['og:image:height'];
 	return tags;
 }
 
@@ -214,7 +260,8 @@ export async function previewUrl(target: string | null, serverName: string): Pro
 	}
 
 	const tweet = TWITTER_HOSTS.test(url.hostname) ? TWITTER_STATUS.exec(url.pathname)?.[1] : undefined;
-	const tags = (tweet ? await previewTweet(tweet) : null) ?? (await previewPage(url));
+	const tumblr = tumblrPost(url);
+	const tags = (tweet ? await previewTweet(tweet) : null) ?? (tumblr ? await previewTumblr(url, tumblr) : await previewPage(url));
 	if (!tags) {
 		return new Response(JSON.stringify(matrixRessourceNotFound('no html preview for this url')), {
 			headers: CORS_HEADERS,

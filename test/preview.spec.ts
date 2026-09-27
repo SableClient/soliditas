@@ -208,6 +208,80 @@ describe('preview_url for tweets', () => {
 	});
 });
 
+describe('preview_url for fediverse posts', () => {
+	const note = '<meta name="misskey:note-id" content="n1"><meta property="og:title" content="Ann (@ann)"><meta property="og:image" content="https://misskey.example/avatar.webp">';
+
+	function serveNote(activity: unknown) {
+		return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+			const accept = new Headers(init?.headers).get('Accept');
+			return accept === 'application/activity+json' ? json(activity) : html(note);
+		});
+	}
+
+	it('takes the image of a misskey note from its activity', async () => {
+		serveNote({ attachment: [{ mediaType: 'image/webp', url: 'https://files.example/a.webp', width: 800, height: 600 }] });
+
+		expect(await (await preview('https://misskey.example/notes/n1')).json()).toEqual({
+			'og:title': 'Ann (@ann)',
+			'og:image': `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`,
+			'og:image:width': 800,
+			'og:image:height': 600,
+		});
+	});
+
+	it('keeps the avatar for a sensitive note', async () => {
+		serveNote({ sensitive: true, attachment: [{ mediaType: 'image/webp', url: 'https://files.example/a.webp' }] });
+
+		expect((await (await preview('https://misskey.example/notes/n1')).json()) as object).toMatchObject({
+			'og:image': `mxc://gifs.example/${toMatrixID('https://misskey.example/avatar.webp', 'og_')}`,
+		});
+	});
+
+	it('drops an image that is only the site root', async () => {
+		servePage('<meta property="og:title" content="t"><meta property="og:image" content="https://friendica.example/">');
+
+		expect(await (await preview('https://friendica.example/display/1')).json()).toEqual({ 'og:title': 't' });
+	});
+});
+
+describe('preview_url for tumblr posts', () => {
+	const render = 'https://tpmblr.com/_api/renders/post/staff/42/render.png';
+
+	it('uses the fxtumblr render when the post has no image', async () => {
+		serveRoutes({
+			'https://www.tumblr.com/staff/42': () => html('<meta property="og:title" content="Reblog by @staff"><meta property="og:description" content="text">'),
+			'https://tpmblr.com/staff/42': () => html(`<meta property="og:title" content="staff"><meta property="og:image" content="${render}">`),
+		});
+
+		expect(await (await preview('https://www.tumblr.com/staff/42/some-slug')).json()).toEqual({
+			'og:title': 'Reblog by @staff',
+			'og:description': 'text',
+			'og:image': `mxc://gifs.example/${toMatrixID(render, 'og_')}`,
+		});
+	});
+
+	it('keeps the image of the post itself', async () => {
+		serveRoutes({
+			'https://staff.tumblr.com/post/42': () =>
+				html('<meta property="og:title" content="Post"><meta property="og:image" content="https://64.media.tumblr.com/a.png">'),
+			'https://tpmblr.com/staff/42': () => html(`<meta property="og:image" content="${render}">`),
+		});
+
+		expect((await (await preview('https://staff.tumblr.com/post/42')).json()) as object).toMatchObject({
+			'og:image': `mxc://gifs.example/${toMatrixID('https://64.media.tumblr.com/a.png', 'og_')}`,
+		});
+	});
+
+	it('answers from fxtumblr when tumblr is unreachable', async () => {
+		serveRoutes({ 'https://tpmblr.com/staff/42': () => html(`<meta property="og:title" content="staff"><meta property="og:image" content="${render}">`) });
+
+		expect(await (await preview('https://tumblr.com/staff/42')).json()).toEqual({
+			'og:title': 'staff',
+			'og:image': `mxc://gifs.example/${toMatrixID(render, 'og_')}`,
+		});
+	});
+});
+
 describe('og image proxying', () => {
 	it('redirects to the image the id carries', async () => {
 		const response = await proxyMediaCall(toMatrixID('https://news.example/cover.png', 'og_'));
