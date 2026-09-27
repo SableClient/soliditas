@@ -18,6 +18,7 @@
 
 import { matrixEndpointNotImplemented, matrixInvalidParam } from './matrixError';
 import { toMatrixID } from './mxcId';
+import { previewUrl } from './preview';
 import { proxyMediaCall } from './proxy';
 import { returnMatrixServerVers } from './serverversion';
 import { MatrixWellKnownServer, SoliditasAddressConvertResponse } from './types';
@@ -37,6 +38,8 @@ export default {
 		} else if (url.pathname.startsWith('/_matrix/federation/v1/media/download/')) {
 			const mediaId = url.pathname.replace('/_matrix/federation/v1/media/download/', '');
 			return proxyMediaCall(mediaId);
+		} else if (url.pathname === '/_soliditas/preview_url') {
+			return previewUrl(url.searchParams.get('url'), serverName);
 		} else if (url.pathname === '/_soliditas/adressconvert'){
 			// helper function mainly for debug reasons as it should be embeded in the client for production use
 			const remoteType = url.searchParams.get('remoteType');

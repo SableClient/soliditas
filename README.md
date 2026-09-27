@@ -61,6 +61,12 @@ You need to generate a matrix id, using the algorithm as shown above.
 2. mxc: `mxc://example.org/klipy_ZmZkNGFjMTQzZTYzMzVhYzY4OTUxYjc4N2QzYzE5MDIvZTgvM2EvNUxNMGpScEwuZ2lm`
 3. will return a redirect to `https://static.klipy.com/ii/ffd4ac143e6335ac68951b787d3c1902/e8/3a/5LM0jRpL.gif`
 
+## Link previews
+
+`GET /_soliditas/preview_url?url=[url]` answers in the shape of the Matrix `/preview_url` endpoint. Missing `og:` tags are filled from `twitter:` tags, `<title>`, `<meta name="description">` and oEmbed. Twitter/X links are read from the [FxTwitter API](https://github.com/FxEmbed/FxEmbed), Reddit and TikTok titles from their oEmbed endpoints.
+
+`og:image` is returned as `mxc://[servername]/og_[base64url of the image url]`.
+
 ## License
 
 This project is licensed under Apache 2.0, see LICENSE. 

@@ -19,6 +19,7 @@
 import { MatrixError } from './types';
 import { matrixInvalidParam } from './matrixError';
 import { fromMatrixID } from './mxcId';
+import { parsePublicUrl } from './preview';
 
 /**
  * helper function to decode matrix id, and either return the decoded id or a error response
@@ -113,6 +114,17 @@ function proxyKlipy(path: string): Response {
 	return buildMultipartRedirect(`https://static.klipy.com/ii/${path}`)
 }
 
+function proxyOpenGraphImage(url: string): Response {
+	const image = parsePublicUrl(url);
+	if (!image) {
+		return new Response(JSON.stringify(matrixInvalidParam('the og image is not a public http(s) url')), {
+			status: 400,
+			statusText: 'the og image is not a public http(s) url',
+		});
+	}
+	return buildMultipartRedirect(image.href);
+}
+
 export async function proxyMediaCall(rawId: string): Promise<Response> {
 	const decodedId = decodeMatrixId(rawId);
 	if (typeof decodedId !== 'string') {
@@ -121,12 +133,15 @@ export async function proxyMediaCall(rawId: string): Promise<Response> {
 	const isGiphy: boolean = rawId.startsWith('giphy_') || decodedId.startsWith('giphy_');
 	const isTenor: boolean = rawId.startsWith('tenor_') || decodedId.startsWith('tenor_');
 	const isKlipy: boolean = rawId.startsWith('klipy_') || decodedId.startsWith('klipy_');
+	const isOpenGraph: boolean = rawId.startsWith('og_');
 	if (isTenor) {
 		return proxyTenor(decodedId);
 	} else if (isGiphy) {
 		return proxyGiphy(decodedId);
 	} else if (isKlipy) {
 		return proxyKlipy(decodedId);
+	} else if (isOpenGraph) {
+		return proxyOpenGraphImage(decodedId);
 	}
 	return new Response(JSON.stringify(matrixInvalidParam("the identifier of the remote didn't match any supported remote identifier")), {
 		status: 400,
