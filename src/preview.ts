@@ -39,7 +39,13 @@ const OEMBED_ENDPOINTS: [RegExp, string][] = [
 
 const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
 
+const MAX_IMAGES = 10;
+
 type Tags = Record<string, string>;
+
+type Image = { url: string; width?: number; height?: number };
+
+type Preview = { tags: Tags; images: Image[]; cover?: Image };
 
 type OEmbed = {
 	title?: string;
@@ -102,9 +108,33 @@ function setTag(tags: Tags, key: string, value: string | number | undefined): vo
 	tags[key] = String(value);
 }
 
-async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string; misskeyNote: boolean }> {
+function toSize(value: string | number | undefined): number | undefined {
+	const size = typeof value === 'number' ? value : Number.parseInt(value ?? '', 10);
+	return Number.isFinite(size) && size > 0 ? size : undefined;
+}
+
+function toImage(value: string | undefined, base?: string | URL, width?: string | number, height?: string | number): Image | null {
+	const url = value ? parsePublicUrl(value, base) : null;
+	if (!url || url.pathname === '/') return null;
+	return { url: url.href, width: toSize(width), height: toSize(height) };
+}
+
+function imageKey(image: Image): string {
+	const url = new URL(image.url);
+	if (!url.hostname.endsWith('.media.tumblr.com')) return url.href;
+	return url.pathname.split('/').slice(1, 3).join('/');
+}
+
+function addImages(images: Image[], candidates: (Image | null)[]): void {
+	for (const image of candidates) {
+		if (image && images.length < MAX_IMAGES && !images.some((known) => imageKey(known) === imageKey(image))) images.push(image);
+	}
+}
+
+async function readPage(page: Response, base: string | URL): Promise<{ preview: Preview; oembed?: string; misskeyNote: boolean }> {
 	const tags: Tags = {};
 	const fallback: Tags = {};
+	const found: { url: string; width?: string; height?: string }[] = [];
 	let title = '';
 	let oembed: string | undefined;
 	let misskeyNote = false;
@@ -117,7 +147,13 @@ async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string; 
 				const content = raw && decodeEntities(raw).trim();
 				if (!key || !content) return;
 				if (key === 'misskey:note-id') misskeyNote = true;
-				if (key.startsWith('og:')) setTag(tags, key, content);
+				if (key === 'og:image' || key === 'og:image:url') found.push({ url: content });
+				else if (key === 'og:image:width' || key === 'og:image:height') {
+					const last = found.at(-1);
+					const side = key === 'og:image:width' ? 'width' : 'height';
+					if (last && !last[side]) last[side] = content;
+				} else if (key.startsWith('og:image')) return;
+				else if (key.startsWith('og:')) setTag(tags, key, content);
 				else if (key.startsWith('twitter:') || key === 'description') setTag(fallback, key, content);
 			},
 		})
@@ -137,34 +173,34 @@ async function readPage(page: Response): Promise<{ tags: Tags; oembed?: string; 
 
 	setTag(tags, 'og:title', fallback['twitter:title'] ?? decodeEntities(title).trim());
 	setTag(tags, 'og:description', fallback['twitter:description'] ?? fallback['description']);
-	setTag(tags, 'og:image', fallback['twitter:image'] ?? fallback['twitter:image:src']);
-	return { tags, oembed, misskeyNote };
+
+	const images: Image[] = [];
+	addImages(images, found.map((image) => toImage(image.url, base, image.width, image.height)));
+	if (!images.length) addImages(images, [toImage(fallback['twitter:image'] ?? fallback['twitter:image:src'], base)]);
+	return { preview: { tags, images }, oembed, misskeyNote };
 }
 
-async function mergeNoteAttachment(tags: Tags, url: URL): Promise<void> {
+async function noteImages(url: URL): Promise<Image[]> {
 	const response = await fetchPublic(url, 'application/activity+json');
 	const note = response ? ((await response.json().catch(() => null)) as ActivityNote | null) : null;
-	const image = note?.sensitive ? undefined : note?.attachment?.find((file) => file.mediaType?.startsWith('image/') && file.url);
-	if (!image?.url) return;
-	tags['og:image'] = image.url;
-	delete tags['og:image:width'];
-	delete tags['og:image:height'];
-	setTag(tags, 'og:image:width', image.width);
-	setTag(tags, 'og:image:height', image.height);
+	if (!note || note.sensitive) return [];
+	const images: Image[] = [];
+	addImages(
+		images,
+		(note.attachment ?? []).filter((file) => file.mediaType?.startsWith('image/')).map((file) => toImage(file.url, url, file.width, file.height)),
+	);
+	return images;
 }
 
-function mergeOEmbed(tags: Tags, oembed: OEmbed, authoritative: boolean): void {
+function mergeOEmbed(preview: Preview, oembed: OEmbed, authoritative: boolean): void {
+	const { tags } = preview;
 	if (authoritative && oembed.title) tags['og:description'] = oembed.title;
 	setTag(tags, 'og:title', oembed.title ?? oembed.author_name);
 	setTag(tags, 'og:site_name', oembed.provider_name);
-	if (!tags['og:image'] && oembed.thumbnail_url) {
-		tags['og:image'] = oembed.thumbnail_url;
-		setTag(tags, 'og:image:width', oembed.thumbnail_width);
-		setTag(tags, 'og:image:height', oembed.thumbnail_height);
-	}
+	if (!preview.images.length) addImages(preview.images, [toImage(oembed.thumbnail_url, undefined, oembed.thumbnail_width, oembed.thumbnail_height)]);
 }
 
-async function previewTweet(id: string): Promise<Tags | null> {
+async function previewTweet(id: string): Promise<Preview | null> {
 	const body = await fetchJson<{ tweet?: FxTweet }>(new URL(`https://api.fxtwitter.com/status/${id}`));
 	const tweet = body?.tweet;
 	if (!tweet) return null;
@@ -174,45 +210,38 @@ async function previewTweet(id: string): Promise<Tags | null> {
 	setTag(tags, 'og:title', name && handle ? `${name} (@${handle})` : (name ?? handle));
 	setTag(tags, 'og:description', tweet.text);
 
-	const photos = tweet.media?.photos ?? [];
-	const mosaic = photos.length > 1 ? tweet.media?.mosaic?.formats?.jpeg : undefined;
-	const media = photos[0] ?? tweet.media?.videos?.[0];
-	if (mosaic) {
-		tags['og:image'] = mosaic;
-	} else if (media) {
-		setTag(tags, 'og:image', media.thumbnail_url ?? media.url);
-		setTag(tags, 'og:image:width', media.width);
-		setTag(tags, 'og:image:height', media.height);
-	} else {
-		setTag(tags, 'og:image', avatar);
-	}
-	return tags;
+	const images: Image[] = [];
+	const media = [...(tweet.media?.photos ?? []), ...(tweet.media?.videos ?? [])];
+	addImages(images, media.map((item) => toImage(item.thumbnail_url ?? item.url, undefined, item.width, item.height)));
+	if (!images.length) addImages(images, [toImage(avatar)]);
+
+	const mosaic = images.length > 1 ? toImage(tweet.media?.mosaic?.formats?.jpeg) : null;
+	return { tags, images, cover: mosaic ?? undefined };
 }
 
-async function previewPage(url: URL): Promise<Tags | null> {
+async function previewPage(url: URL): Promise<Preview | null> {
 	const endpoint = OEMBED_ENDPOINTS.find(([host]) => host.test(url.hostname))?.[1];
 	const known = endpoint ? fetchJson<OEmbed>(new URL(`${endpoint}?format=json&url=${encodeURIComponent(url.href)}`)) : null;
 
 	const page = await fetchPublic(url, 'text/html');
-	const html = page?.headers.get('Content-Type')?.includes('text/html') ? await readPage(page) : null;
+	const base = page?.url || url;
+	const html = page?.headers.get('Content-Type')?.includes('text/html') ? await readPage(page, base) : null;
 	const knownOEmbed = await known;
 	if (!html && !knownOEmbed) return null;
 
-	const tags = html?.tags ?? {};
-	const base = page?.url || url;
-	if (knownOEmbed) mergeOEmbed(tags, knownOEmbed, true);
-	else if (html?.oembed && !(tags['og:title'] && tags['og:description'] && tags['og:image'])) {
+	const preview = html?.preview ?? { tags: {}, images: [] };
+	const { tags } = preview;
+	if (knownOEmbed) mergeOEmbed(preview, knownOEmbed, true);
+	else if (html?.oembed && !(tags['og:title'] && tags['og:description'] && preview.images.length)) {
 		const discovered = parsePublicUrl(html.oembed, base);
 		const found = discovered ? await fetchJson<OEmbed>(discovered) : null;
-		if (found) mergeOEmbed(tags, found, false);
+		if (found) mergeOEmbed(preview, found, false);
 	}
-	if (html?.misskeyNote) await mergeNoteAttachment(tags, url);
-
-	if (tags['og:image']) {
-		const image = parsePublicUrl(tags['og:image'], base);
-		tags['og:image'] = image && image.pathname !== '/' ? image.href : '';
+	if (html?.misskeyNote) {
+		const attachments = await noteImages(url);
+		if (attachments.length) preview.images = attachments;
 	}
-	return tags;
+	return preview;
 }
 
 function tumblrPost(url: URL): string | null {
@@ -226,26 +255,25 @@ function tumblrPost(url: URL): string | null {
 	return id ? `${dashboardBlog}/${id}` : null;
 }
 
-async function previewTumblr(url: URL, post: string): Promise<Tags | null> {
-	const [tags, fxtumblr] = await Promise.all([previewPage(url), previewPage(new URL(`https://tpmblr.com/${post}`))]);
-	if (!tags || tags['og:image'] || !fxtumblr?.['og:image']) return tags ?? fxtumblr;
-	tags['og:image'] = fxtumblr['og:image'];
-	delete tags['og:image:width'];
-	delete tags['og:image:height'];
-	return tags;
+async function previewTumblr(url: URL, post: string): Promise<Preview | null> {
+	const [preview, fxtumblr] = await Promise.all([previewPage(url), previewPage(new URL(`https://tpmblr.com/${post}`))]);
+	if (!preview || preview.images.length || !fxtumblr?.images.length) return preview ?? fxtumblr;
+	preview.images = fxtumblr.images;
+	return preview;
 }
 
-function toMatrixPreview(tags: Tags, serverName: string): Record<string, string | number> {
-	const preview: Record<string, string | number> = { ...tags };
+function toMatrixPreview({ tags, images, cover }: Preview, serverName: string): Record<string, unknown> {
+	const toMxc = (image: Image) => `mxc://${serverName}/${toMatrixID(image.url, 'og_')}`;
+	const preview: Record<string, unknown> = { ...tags };
 
-	delete preview['og:image'];
-	const image = tags['og:image'] ? parsePublicUrl(tags['og:image']) : null;
-	if (image) preview['og:image'] = `mxc://${serverName}/${toMatrixID(image.href, 'og_')}`;
-
-	for (const key of ['og:image:width', 'og:image:height']) {
-		const size = Number.parseInt(tags[key] ?? '', 10);
-		if (image && Number.isFinite(size) && size > 0) preview[key] = size;
-		else delete preview[key];
+	const main = cover ?? images[0];
+	if (main) {
+		preview['og:image'] = toMxc(main);
+		if (main.width) preview['og:image:width'] = main.width;
+		if (main.height) preview['og:image:height'] = main.height;
+	}
+	if (images.length > 1) {
+		preview['com.sable.images'] = images.map((image) => ({ url: toMxc(image), width: image.width, height: image.height }));
 	}
 	return preview;
 }
@@ -261,15 +289,15 @@ export async function previewUrl(target: string | null, serverName: string): Pro
 
 	const tweet = TWITTER_HOSTS.test(url.hostname) ? TWITTER_STATUS.exec(url.pathname)?.[1] : undefined;
 	const tumblr = tumblrPost(url);
-	const tags = (tweet ? await previewTweet(tweet) : null) ?? (tumblr ? await previewTumblr(url, tumblr) : await previewPage(url));
-	if (!tags) {
+	const preview = (tweet ? await previewTweet(tweet) : null) ?? (tumblr ? await previewTumblr(url, tumblr) : await previewPage(url));
+	if (!preview) {
 		return new Response(JSON.stringify(matrixRessourceNotFound('no html preview for this url')), {
 			headers: CORS_HEADERS,
 			status: 404,
 		});
 	}
 
-	return new Response(JSON.stringify(toMatrixPreview(tags, serverName)), {
+	return new Response(JSON.stringify(toMatrixPreview(preview, serverName)), {
 		headers: { ...CORS_HEADERS, 'Cache-Control': 'public, max-age=86400' },
 	});
 }

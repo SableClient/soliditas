@@ -96,6 +96,48 @@ describe('preview_url', () => {
 	});
 });
 
+describe('preview_url with several images', () => {
+	it('lists every og:image with the sizes that follow it', async () => {
+		servePage(`<meta property="og:title" content="Gallery">
+			<meta property="og:image" content="/1.png"><meta property="og:image:width" content="100"><meta property="og:image:height" content="50">
+			<meta property="og:image" content="https://cdn.example/2.png">
+			<meta property="og:image" content="https://cdn.example/2.png">
+			<meta property="og:image:secure_url" content="https://cdn.example/ignored.png">
+			<meta property="og:image" content="http://10.0.0.1/private.png">`);
+
+		const first = `mxc://gifs.example/${toMatrixID('https://gallery.example/1.png', 'og_')}`;
+		expect(await (await preview('https://gallery.example/post')).json()).toEqual({
+			'og:title': 'Gallery',
+			'og:image': first,
+			'og:image:width': 100,
+			'og:image:height': 50,
+			'com.sable.images': [
+				{ url: first, width: 100, height: 50 },
+				{ url: `mxc://gifs.example/${toMatrixID('https://cdn.example/2.png', 'og_')}` },
+			],
+		});
+	});
+
+	it('lists a tumblr gif once, not again as its first frame', async () => {
+		servePage(`<meta property="og:image" content="https://64.media.tumblr.com/abc/123-b0/s1280x1920/one.gif">
+			<meta property="og:image" content="https://44.media.tumblr.com/abc/123-b0/s1280x1920_f1/two.gif">
+			<meta property="og:image" content="https://64.media.tumblr.com/def/123-dd/s1280x1920/three.gif">`);
+
+		const body = (await (await preview('https://staff.tumblr.com/')).json()) as { 'com.sable.images': { url: string }[] };
+		expect(body['com.sable.images'].map((image) => image.url)).toEqual([
+			`mxc://gifs.example/${toMatrixID('https://64.media.tumblr.com/abc/123-b0/s1280x1920/one.gif', 'og_')}`,
+			`mxc://gifs.example/${toMatrixID('https://64.media.tumblr.com/def/123-dd/s1280x1920/three.gif', 'og_')}`,
+		]);
+	});
+
+	it('stops at ten images', async () => {
+		servePage(Array.from({ length: 12 }, (_, i) => `<meta property="og:image" content="https://cdn.example/${i}.png">`).join(''));
+
+		const body = (await (await preview('https://gallery.example/')).json()) as { 'com.sable.images': unknown[] };
+		expect(body['com.sable.images']).toHaveLength(10);
+	});
+});
+
 describe('preview_url fallbacks', () => {
 	it('fills gaps from the twitter card tags and decodes entities', async () => {
 		servePage(`<meta name="twitter:title" content="Tom &amp; Jerry">
@@ -186,19 +228,31 @@ describe('preview_url for tweets', () => {
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it('uses the mosaic for several photos and the avatar for none', async () => {
+	it('uses the mosaic as the main image and lists every photo', async () => {
 		serveRoutes({
 			'https://api.fxtwitter.com/status/1': () =>
-				json({ tweet: { author, media: { photos: [{ url: 'a' }, { url: 'b' }], mosaic: { formats: { jpeg: 'https://mosaic.example/1' } } } } }),
+				json({
+					tweet: {
+						author,
+						media: {
+							photos: [{ url: 'https://pbs.twimg.com/a.jpg', width: 10, height: 20 }, { url: 'https://pbs.twimg.com/b.jpg' }],
+							mosaic: { formats: { jpeg: 'https://mosaic.example/1' } },
+						},
+					},
+				}),
 			'https://api.fxtwitter.com/status/2': () => json({ tweet: { author, text: 'hi' } }),
 		});
 
 		expect((await (await preview('https://twitter.com/NASA/status/1')).json()) as object).toMatchObject({
 			'og:image': `mxc://gifs.example/${toMatrixID('https://mosaic.example/1', 'og_')}`,
+			'com.sable.images': [
+				{ url: `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/a.jpg', 'og_')}`, width: 10, height: 20 },
+				{ url: `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/b.jpg', 'og_')}` },
+			],
 		});
-		expect((await (await preview('https://fixupx.com/NASA/status/2')).json()) as object).toMatchObject({
-			'og:image': `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/avatar.jpg', 'og_')}`,
-		});
+		const single = (await (await preview('https://fixupx.com/NASA/status/2')).json()) as Record<string, unknown>;
+		expect(single['og:image']).toBe(`mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/avatar.jpg', 'og_')}`);
+		expect(single).not.toHaveProperty('com.sable.images');
 	});
 
 	it('falls back to the page when the api has nothing', async () => {
@@ -219,13 +273,24 @@ describe('preview_url for fediverse posts', () => {
 	}
 
 	it('takes the image of a misskey note from its activity', async () => {
-		serveNote({ attachment: [{ mediaType: 'image/webp', url: 'https://files.example/a.webp', width: 800, height: 600 }] });
+		serveNote({
+			attachment: [
+				{ mediaType: 'image/webp', url: 'https://files.example/a.webp', width: 800, height: 600 },
+				{ mediaType: 'video/mp4', url: 'https://files.example/v.mp4' },
+				{ mediaType: 'image/png', url: 'https://files.example/b.png' },
+			],
+		});
 
+		const a = `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`;
 		expect(await (await preview('https://misskey.example/notes/n1')).json()).toEqual({
 			'og:title': 'Ann (@ann)',
-			'og:image': `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`,
+			'og:image': a,
 			'og:image:width': 800,
 			'og:image:height': 600,
+			'com.sable.images': [
+				{ url: a, width: 800, height: 600 },
+				{ url: `mxc://gifs.example/${toMatrixID('https://files.example/b.png', 'og_')}` },
+			],
 		});
 	});
 
