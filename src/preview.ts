@@ -219,12 +219,23 @@ async function previewTweet(id: string): Promise<Preview | null> {
 	return { tags, images, cover: mosaic ?? undefined };
 }
 
+function imageType(page: Response): string | null {
+	const type = /^\s*(image\/[\w.+-]+)/i.exec(page.headers.get('Content-Type') ?? '')?.[1].toLowerCase();
+	return type && type !== 'image/svg+xml' ? type : null;
+}
+
 async function previewPage(url: URL): Promise<Preview | null> {
 	const endpoint = OEMBED_ENDPOINTS.find(([host]) => host.test(url.hostname))?.[1];
 	const known = endpoint ? fetchJson<OEmbed>(new URL(`${endpoint}?format=json&url=${encodeURIComponent(url.href)}`)) : null;
 
 	const page = await fetchPublic(url, 'text/html');
 	const base = page?.url || url;
+	const type = page && imageType(page);
+	if (page && type) {
+		await page.body?.cancel();
+		const image = toImage(base.toString());
+		return image ? { tags: { 'og:image:type': type }, images: [image] } : null;
+	}
 	const html = page?.headers.get('Content-Type')?.includes('text/html') ? await readPage(page, base) : null;
 	const knownOEmbed = await known;
 	if (!html && !knownOEmbed) return null;

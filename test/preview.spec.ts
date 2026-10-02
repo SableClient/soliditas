@@ -89,6 +89,18 @@ describe('preview_url', () => {
 		expect((await preview('https://api.example/')).status).toBe(404);
 	});
 
+	it('previews a direct image link as the image itself', async () => {
+		servePage('', 'image/gif');
+
+		const response = await preview('https://cdn.example/clip.gif');
+		const body = (await response.json()) as Record<string, unknown>;
+
+		expect(response.status).toBe(200);
+		expect(body['og:image']).toBe(`mxc://gifs.example/${toMatrixID('https://cdn.example/clip.gif', 'og_')}`);
+		expect(body['og:image:type']).toBe('image/gif');
+		expect(body['og:title']).toBeUndefined();
+	});
+
 	it('answers not found when the page cannot be fetched', async () => {
 		vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('down'));
 
