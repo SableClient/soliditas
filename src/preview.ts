@@ -41,11 +41,17 @@ const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quo
 
 const MAX_IMAGES = 10;
 
+const MAX_DIRECT_VIDEO_BYTES = 100 * 1024 * 1024;
+
+const VIDEO_EXTENSION = /\.(?:mp4|webm|mov|m4v|ogv)$/i;
+
 type Tags = Record<string, string>;
 
 type Image = { url: string; width?: number; height?: number };
 
-type Preview = { tags: Tags; images: Image[]; cover?: Image };
+type Video = { url: string; type: string; width?: number; height?: number };
+
+type Preview = { tags: Tags; images: Image[]; cover?: Image; video?: Video };
 
 type OEmbed = {
 	title?: string;
@@ -119,6 +125,14 @@ function toImage(value: string | undefined, base?: string | URL, width?: string 
 	return { url: url.href, width: toSize(width), height: toSize(height) };
 }
 
+function toVideo(value: string | undefined, base: string | URL, type?: string, width?: string | number, height?: string | number): Video | null {
+	const url = value ? parsePublicUrl(value, base) : null;
+	if (!url || url.pathname === '/') return null;
+	const mime = type?.split(';')[0].trim().toLowerCase();
+	if (mime ? !mime.startsWith('video/') : !VIDEO_EXTENSION.test(url.pathname)) return null;
+	return { url: url.href, type: mime ?? 'video/mp4', width: toSize(width), height: toSize(height) };
+}
+
 function imageKey(image: Image): string {
 	const url = new URL(image.url);
 	if (!url.hostname.endsWith('.media.tumblr.com')) return url.href;
@@ -138,6 +152,7 @@ async function readPage(page: Response, base: string | URL): Promise<{ preview: 
 	let title = '';
 	let oembed: string | undefined;
 	let misskeyNote = false;
+	const clip: { url?: string; secure?: string; type?: string; width?: string; height?: string } = {};
 
 	await new HTMLRewriter()
 		.on('meta', {
@@ -147,7 +162,12 @@ async function readPage(page: Response, base: string | URL): Promise<{ preview: 
 				const content = raw && decodeEntities(raw).trim();
 				if (!key || !content) return;
 				if (key === 'misskey:note-id') misskeyNote = true;
-				if (key === 'og:image' || key === 'og:image:url') found.push({ url: content });
+				if (key === 'og:video' || key === 'og:video:url') clip.url ??= content;
+				else if (key === 'og:video:secure_url') clip.secure ??= content;
+				else if (key === 'og:video:type') clip.type ??= content;
+				else if (key === 'og:video:width') clip.width ??= content;
+				else if (key === 'og:video:height') clip.height ??= content;
+				else if (key === 'og:image' || key === 'og:image:url') found.push({ url: content });
 				else if (key === 'og:image:width' || key === 'og:image:height') {
 					const last = found.at(-1);
 					const side = key === 'og:image:width' ? 'width' : 'height';
@@ -177,7 +197,8 @@ async function readPage(page: Response, base: string | URL): Promise<{ preview: 
 	const images: Image[] = [];
 	addImages(images, found.map((image) => toImage(image.url, base, image.width, image.height)));
 	if (!images.length) addImages(images, [toImage(fallback['twitter:image'] ?? fallback['twitter:image:src'], base)]);
-	return { preview: { tags, images }, oembed, misskeyNote };
+	const video = toVideo(clip.secure ?? clip.url, base, clip.type, clip.width, clip.height);
+	return { preview: { tags, images, video: video ?? undefined }, oembed, misskeyNote };
 }
 
 async function noteImages(url: URL): Promise<Image[]> {
@@ -224,12 +245,26 @@ function imageType(page: Response): string | null {
 	return type && type !== 'image/svg+xml' ? type : null;
 }
 
+function videoType(page: Response): string | null {
+	return /^\s*(video\/[\w.+-]+)/i.exec(page.headers.get('Content-Type') ?? '')?.[1].toLowerCase() ?? null;
+}
+
+function videoSize(page: Response): number {
+	return toSize(page.headers.get('Content-Length') ?? undefined) ?? 0;
+}
+
 async function previewPage(url: URL): Promise<Preview | null> {
 	const endpoint = OEMBED_ENDPOINTS.find(([host]) => host.test(url.hostname))?.[1];
 	const known = endpoint ? fetchJson<OEmbed>(new URL(`${endpoint}?format=json&url=${encodeURIComponent(url.href)}`)) : null;
 
 	const page = await fetchPublic(url, 'text/html');
 	const base = page?.url || url;
+	const clipType = page && videoType(page);
+	if (page && clipType) {
+		await page.body?.cancel();
+		const video = toVideo(base.toString(), base, clipType);
+		return video && videoSize(page) <= MAX_DIRECT_VIDEO_BYTES ? { tags: {}, images: [], video } : null;
+	}
 	const type = page && imageType(page);
 	if (page && type) {
 		await page.body?.cancel();
@@ -273,7 +308,7 @@ async function previewTumblr(url: URL, post: string): Promise<Preview | null> {
 	return preview;
 }
 
-function toMatrixPreview({ tags, images, cover }: Preview, serverName: string): Record<string, unknown> {
+function toMatrixPreview({ tags, images, cover, video }: Preview, serverName: string): Record<string, unknown> {
 	const toMxc = (image: Image) => `mxc://${serverName}/${toMatrixID(image.url, 'og_')}`;
 	const preview: Record<string, unknown> = { ...tags };
 
@@ -282,6 +317,12 @@ function toMatrixPreview({ tags, images, cover }: Preview, serverName: string): 
 		preview['og:image'] = toMxc(main);
 		if (main.width) preview['og:image:width'] = main.width;
 		if (main.height) preview['og:image:height'] = main.height;
+	}
+	if (video) {
+		preview['og:video'] = toMxc({ url: video.url });
+		preview['og:video:type'] = video.type;
+		if (video.width) preview['og:video:width'] = video.width;
+		if (video.height) preview['og:video:height'] = video.height;
 	}
 	if (images.length > 1) {
 		preview['com.sable.images'] = images.map((image) => ({ url: toMxc(image), width: image.width, height: image.height }));

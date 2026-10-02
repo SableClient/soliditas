@@ -101,6 +101,56 @@ describe('preview_url', () => {
 		expect(body['og:title']).toBeUndefined();
 	});
 
+	it('previews a direct video link as the video itself', async () => {
+		servePage('', 'video/mp4');
+
+		const body = (await (await preview('https://cdn.example/clip.mp4')).json()) as Record<string, unknown>;
+
+		expect(body['og:video']).toBe(`mxc://gifs.example/${toMatrixID('https://cdn.example/clip.mp4', 'og_')}`);
+		expect(body['og:video:type']).toBe('video/mp4');
+		expect(body['og:image']).toBeUndefined();
+	});
+
+	it('refuses a direct video over the size cap', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+			new Response('', { headers: { 'Content-Type': 'video/mp4', 'Content-Length': String(101 * 1024 * 1024) } }),
+		);
+
+		expect((await preview('https://cdn.example/big.mp4')).status).toBe(404);
+	});
+
+	it('proxies the video a page declares and keeps its poster', async () => {
+		servePage(`<html><head>
+			<meta property="og:title" content="Clip">
+			<meta property="og:image" content="https://cdn.example/poster.jpg">
+			<meta property="og:video" content="http://cdn.example/clip.mp4">
+			<meta property="og:video:secure_url" content="https://cdn.example/clip.mp4">
+			<meta property="og:video:type" content="video/mp4">
+			<meta property="og:video:width" content="1280">
+			<meta property="og:video:height" content="720">
+		</head></html>`);
+
+		const body = (await (await preview('https://site.example/watch')).json()) as Record<string, unknown>;
+
+		expect(body['og:video']).toBe(`mxc://gifs.example/${toMatrixID('https://cdn.example/clip.mp4', 'og_')}`);
+		expect(body['og:video:width']).toBe(1280);
+		expect(body['og:video:height']).toBe(720);
+		expect(body['og:image']).toBeDefined();
+		expect(body['og:title']).toBe('Clip');
+	});
+
+	it('ignores an embed player that is not a video file', async () => {
+		servePage(`<html><head>
+			<meta property="og:title" content="Watch">
+			<meta property="og:video" content="https://site.example/embed/1">
+			<meta property="og:video:type" content="text/html">
+		</head></html>`);
+
+		const body = (await (await preview('https://site.example/watch')).json()) as Record<string, unknown>;
+
+		expect(body['og:video']).toBeUndefined();
+	});
+
 	it('answers not found when the page cannot be fetched', async () => {
 		vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('down'));
 
