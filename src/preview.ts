@@ -41,6 +41,8 @@ const NAMED_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quo
 
 const MAX_IMAGES = 10;
 
+const THEME_COLOR = /^#(?:[\da-f]{3,4}|[\da-f]{6}|[\da-f]{8})$/i;
+
 const MAX_DIRECT_VIDEO_BYTES = 100 * 1024 * 1024;
 
 const VIDEO_EXTENSION = /\.(?:mp4|webm|mov|m4v|ogv)$/i;
@@ -56,6 +58,7 @@ type Preview = { tags: Tags; images: Image[]; cover?: Image; video?: Video };
 type OEmbed = {
 	title?: string;
 	author_name?: string;
+	author_url?: string;
 	provider_name?: string;
 	thumbnail_url?: string;
 	thumbnail_width?: number;
@@ -174,7 +177,7 @@ async function readPage(page: Response, base: string | URL): Promise<{ preview: 
 					if (last && !last[side]) last[side] = content;
 				} else if (key.startsWith('og:image')) return;
 				else if (key.startsWith('og:')) setTag(tags, key, content);
-				else if (key.startsWith('twitter:') || key === 'description') setTag(fallback, key, content);
+				else if (key.startsWith('twitter:') || key === 'description' || key === 'theme-color') setTag(fallback, key, content);
 			},
 		})
 		.on('link[rel="alternate"][type="application/json+oembed"]', {
@@ -193,6 +196,11 @@ async function readPage(page: Response, base: string | URL): Promise<{ preview: 
 
 	setTag(tags, 'og:title', fallback['twitter:title'] ?? decodeEntities(title).trim());
 	setTag(tags, 'og:description', fallback['twitter:description'] ?? fallback['description']);
+
+	const color = fallback['theme-color'];
+	if (color && THEME_COLOR.test(color)) tags['com.sable.theme_color'] = color;
+	const card = fallback['twitter:card'];
+	if (card === 'summary' || card === 'summary_large_image') tags['com.sable.card'] = card;
 
 	const images: Image[] = [];
 	addImages(images, found.map((image) => toImage(image.url, base, image.width, image.height)));
@@ -217,6 +225,7 @@ function mergeOEmbed(preview: Preview, oembed: OEmbed, authoritative: boolean): 
 	const { tags } = preview;
 	if (authoritative && oembed.title) tags['og:description'] = oembed.title;
 	setTag(tags, 'og:title', oembed.title ?? oembed.author_name);
+	setTag(tags, 'com.sable.author_name', oembed.author_name);
 	setTag(tags, 'og:site_name', oembed.provider_name);
 	if (!preview.images.length) addImages(preview.images, [toImage(oembed.thumbnail_url, undefined, oembed.thumbnail_width, oembed.thumbnail_height)]);
 }

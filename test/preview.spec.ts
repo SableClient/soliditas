@@ -158,6 +158,45 @@ describe('preview_url', () => {
 	});
 });
 
+describe('preview_url presentation hints', () => {
+	it('passes the theme colour and card size through', async () => {
+		servePage(`<html><head>
+			<meta property="og:title" content="A post">
+			<meta name="theme-color" content="#ff4500">
+			<meta name="twitter:card" content="summary_large_image">
+		</head></html>`);
+
+		const body = (await (await preview('https://site.example/post')).json()) as Record<string, unknown>;
+
+		expect(body['com.sable.theme_color']).toBe('#ff4500');
+		expect(body['com.sable.card']).toBe('summary_large_image');
+	});
+
+	it('drops a theme colour that is not a hex colour and an unknown card', async () => {
+		servePage(`<html><head>
+			<meta property="og:title" content="A post">
+			<meta name="theme-color" content="red; background:url(x)">
+			<meta name="twitter:card" content="player">
+		</head></html>`);
+
+		const body = (await (await preview('https://site.example/post')).json()) as Record<string, unknown>;
+
+		expect(body['com.sable.theme_color']).toBeUndefined();
+		expect(body['com.sable.card']).toBeUndefined();
+	});
+
+	it('keeps the oembed author', async () => {
+		serveRoutes({
+			'https://www.reddit.com/oembed': () => json({ title: 'T', author_name: 'someone', provider_name: 'Reddit' }),
+			'https://www.reddit.com/r/': () => html('<html><head></head></html>'),
+		});
+
+		const body = (await (await preview('https://www.reddit.com/r/x/comments/1/t/')).json()) as Record<string, unknown>;
+
+		expect(body['com.sable.author_name']).toBe('someone');
+	});
+});
+
 describe('preview_url with several images', () => {
 	it('lists every og:image with the sizes that follow it', async () => {
 		servePage(`<meta property="og:title" content="Gallery">
@@ -260,6 +299,7 @@ describe('preview_url fallbacks', () => {
 			'og:title': 'caption',
 			'og:description': 'caption',
 			'og:site_name': 'TikTok',
+			'com.sable.author_name': 'Scout',
 		});
 	});
 });
