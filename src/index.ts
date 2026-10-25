@@ -21,6 +21,7 @@ import { toMatrixID } from './mxcId';
 import { previewUrl } from './preview';
 import { proxyMediaCall } from './proxy';
 import { returnMatrixServerVers } from './serverversion';
+import { youtubeEmbed } from './youtube';
 import { MatrixWellKnownServer, SoliditasAddressConvertResponse } from './types';
 
 export default {
@@ -40,6 +41,8 @@ export default {
 			return proxyMediaCall(mediaId);
 		} else if (url.pathname === '/_soliditas/preview_url') {
 			return previewUrl(url.searchParams.get('url'), serverName);
+		} else if (url.pathname === '/_soliditas/embed/youtube') {
+			return youtubeEmbed(url.searchParams);
 		} else if (url.pathname === '/_soliditas/adressconvert'){
 			// helper function mainly for debug reasons as it should be embeded in the client for production use
 			const remoteType = url.searchParams.get('remoteType');
