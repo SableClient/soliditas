@@ -287,6 +287,8 @@ describe('preview_url fallbacks', () => {
 			'og:title': 'From the pics community on Reddit',
 			'og:description': 'test post please ignore',
 			'og:site_name': 'reddit',
+			'og:type': 'note',
+			'note:content': 'test post please ignore',
 		});
 	});
 
@@ -300,6 +302,9 @@ describe('preview_url fallbacks', () => {
 			'og:description': 'caption',
 			'og:site_name': 'TikTok',
 			'com.sable.author_name': 'Scout',
+			'og:type': 'note',
+			'note:author': 'Scout',
+			'note:content': 'caption',
 		});
 	});
 });
@@ -326,11 +331,17 @@ describe('preview_url for tweets', () => {
 			'og:image': `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/media/a.jpg', 'og_')}`,
 			'og:image:width': 3000,
 			'og:image:height': 2000,
+			'og:type': 'note',
+			'note:author': 'NASA',
+			'note:author:handle': 'NASA',
+			'note:author:image': `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/avatar.jpg', 'og_')}`,
+			'note:author:url': 'https://x.com/NASA',
+			'note:content': 'Liftoff',
 		});
 		expect(fetchSpy).toHaveBeenCalledTimes(1);
 	});
 
-	it('uses the mosaic as the main image and lists every photo', async () => {
+	it('numbers every photo after the first and keeps the avatar out of og:image', async () => {
 		serveRoutes({
 			'https://api.fxtwitter.com/status/1': () =>
 				json({
@@ -338,7 +349,6 @@ describe('preview_url for tweets', () => {
 						author,
 						media: {
 							photos: [{ url: 'https://pbs.twimg.com/a.jpg', width: 10, height: 20 }, { url: 'https://pbs.twimg.com/b.jpg' }],
-							mosaic: { formats: { jpeg: 'https://mosaic.example/1' } },
 						},
 					},
 				}),
@@ -346,15 +356,14 @@ describe('preview_url for tweets', () => {
 		});
 
 		expect((await (await preview('https://twitter.com/NASA/status/1')).json()) as object).toMatchObject({
-			'og:image': `mxc://gifs.example/${toMatrixID('https://mosaic.example/1', 'og_')}`,
-			'com.sable.images': [
-				{ url: `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/a.jpg', 'og_')}`, width: 10, height: 20 },
-				{ url: `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/b.jpg', 'og_')}` },
-			],
+			'og:image': `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/a.jpg', 'og_')}`,
+			'og:image:width': 10,
+			'og:image:height': 20,
+			'og:image:1': `mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/b.jpg', 'og_')}`,
 		});
 		const single = (await (await preview('https://fixupx.com/NASA/status/2')).json()) as Record<string, unknown>;
-		expect(single['og:image']).toBe(`mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/avatar.jpg', 'og_')}`);
-		expect(single).not.toHaveProperty('com.sable.images');
+		expect(single).not.toHaveProperty('og:image');
+		expect(single['note:author:image']).toBe(`mxc://gifs.example/${toMatrixID('https://pbs.twimg.com/avatar.jpg', 'og_')}`);
 	});
 
 	it('falls back to the page when the api has nothing', async () => {
@@ -374,33 +383,39 @@ describe('preview_url for fediverse posts', () => {
 		});
 	}
 
-	it('takes the image of a misskey note from its activity', async () => {
+	it('reads a misskey note from its activity', async () => {
 		serveNote({
+			type: 'Note',
+			content: '<p>hi</p>',
 			attachment: [
 				{ mediaType: 'image/webp', url: 'https://files.example/a.webp', width: 800, height: 600 },
-				{ mediaType: 'video/mp4', url: 'https://files.example/v.mp4' },
+				{ mediaType: 'audio/mpeg', url: 'https://files.example/a.mp3' },
 				{ mediaType: 'image/png', url: 'https://files.example/b.png' },
 			],
 		});
 
-		const a = `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`;
 		expect(await (await preview('https://misskey.example/notes/n1')).json()).toEqual({
 			'og:title': 'Ann (@ann)',
-			'og:image': a,
+			'og:description': 'hi',
+			'og:type': 'note',
+			'note:content': 'hi',
+			'og:image': `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`,
+			'og:image:type': 'image/webp',
 			'og:image:width': 800,
 			'og:image:height': 600,
-			'com.sable.images': [
-				{ url: a, width: 800, height: 600 },
-				{ url: `mxc://gifs.example/${toMatrixID('https://files.example/b.png', 'og_')}` },
-			],
+			'og:image:1': `mxc://gifs.example/${toMatrixID('https://files.example/b.png', 'og_')}`,
+			'og:image:1:type': 'image/png',
 		});
 	});
 
-	it('keeps the avatar for a sensitive note', async () => {
-		serveNote({ sensitive: true, attachment: [{ mediaType: 'image/webp', url: 'https://files.example/a.webp' }] });
+	it('keeps the media of a sensitive note out of og:image', async () => {
+		serveNote({ type: 'Note', sensitive: true, attachment: [{ mediaType: 'image/webp', url: 'https://files.example/a.webp' }] });
 
-		expect((await (await preview('https://misskey.example/notes/n1')).json()) as object).toMatchObject({
-			'og:image': `mxc://gifs.example/${toMatrixID('https://misskey.example/avatar.webp', 'og_')}`,
+		const answer = (await (await preview('https://misskey.example/notes/n1')).json()) as Record<string, unknown>;
+		expect(answer).not.toHaveProperty('og:image');
+		expect(answer).toMatchObject({
+			'note:sensitivity': 'inappropriate',
+			'og:image:1': `mxc://gifs.example/${toMatrixID('https://files.example/a.webp', 'og_')}`,
 		});
 	});
 
@@ -423,6 +438,12 @@ describe('preview_url for tumblr posts', () => {
 		expect(await (await preview('https://www.tumblr.com/staff/42/some-slug')).json()).toEqual({
 			'og:title': 'Reblog by @staff',
 			'og:description': 'text',
+			'og:site_name': 'Tumblr',
+			'og:type': 'note',
+			'note:author': 'staff',
+			'note:author:handle': 'staff',
+			'note:author:url': 'https://staff.tumblr.com',
+			'note:content': 'text',
 			'og:image': `mxc://gifs.example/${toMatrixID(render, 'og_')}`,
 		});
 	});
@@ -442,7 +463,7 @@ describe('preview_url for tumblr posts', () => {
 	it('answers from fxtumblr when tumblr is unreachable', async () => {
 		serveRoutes({ 'https://tpmblr.com/staff/42': () => html(`<meta property="og:title" content="staff"><meta property="og:image" content="${render}">`) });
 
-		expect(await (await preview('https://tumblr.com/staff/42')).json()).toEqual({
+		expect((await (await preview('https://tumblr.com/staff/42')).json()) as object).toMatchObject({
 			'og:title': 'staff',
 			'og:image': `mxc://gifs.example/${toMatrixID(render, 'og_')}`,
 		});

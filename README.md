@@ -63,11 +63,13 @@ You need to generate a matrix id, using the algorithm as shown above.
 
 ## Link previews
 
-`GET /_soliditas/preview_url?url=[url]` answers in the shape of the Matrix `/preview_url` endpoint. Missing `og:` tags are filled from `twitter:` tags, `<title>`, `<meta name="description">` and oEmbed. Twitter/X links are read from the [FxTwitter API](https://github.com/FxEmbed/FxEmbed), Reddit and TikTok titles from their oEmbed endpoints, Tumblr posts without an image get the [fxtumblr](https://github.com/knuxify/fxtumblr) render, and Misskey-family notes show their images from the ActivityPub object unless marked sensitive, instead of the author's avatar.
+`GET /_soliditas/preview_url?url=[url]` answers in the shape of the Matrix `/preview_url` endpoint. Missing `og:` tags are filled from `twitter:` tags, `<title>`, `<meta name="description">` and oEmbed. Twitter/X links are read from the [FxTwitter API](https://github.com/FxEmbed/FxEmbed), Bluesky posts from their author's PDS, Reddit and TikTok titles from their oEmbed endpoints, Tumblr posts without an image get the [fxtumblr](https://github.com/knuxify/fxtumblr) render, and fediverse posts are read from their ActivityPub object.
 
 The scraper is the Rust crate `sable-link-preview`, which the Sable client also runs natively. `wasm/` compiles it for the worker, and `pnpm build:wasm` (run before `test`, `dev` and `deploy`) needs Rust with the `wasm32-unknown-unknown` target and `wasm-bindgen-cli` 0.2.130.
 
-`og:image` is returned as `mxc://[servername]/og_[base64url of the image url]`. When a post has more than one image, `com.sable.images` lists up to ten of them as `{ url, width, height }`, and `og:image` stays the single image other clients show (the FxTwitter mosaic for tweets).
+Posts from X, Bluesky, the fediverse, Tumblr, Reddit and TikTok, and pages that declare `og:type` `note`, are answered with `og:type` `note` and Sable's `note:` Open Graph keys: the author, text, counts, content warning, every image and video (`og:image`, then `og:image:1`, `og:image:2`...) and the quoted post under `related:1:`, described in the `sable-link-preview` README.
+
+`og:image` is returned as `mxc://[servername]/og_[base64url of the image url]`. When a page has more than one image, `com.sable.images` lists up to ten of them as `{ url, width, height }`, and `og:image` stays the single image other clients show.
 
 ## License
 
