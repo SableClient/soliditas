@@ -170,3 +170,5 @@ dist
 # vscode junk
 
 .lh
+# wasm-bindgen output of wasm/, built by `pnpm build:wasm`
+src/wasm

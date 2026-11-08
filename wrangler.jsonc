@@ -11,7 +11,8 @@
 		"enabled": true
 	},
 	"upload_source_maps": true,
-	"compatibility_flags": []
+	"compatibility_flags": [],
+	"build": { "command": "pnpm build:wasm" }
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement

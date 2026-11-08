@@ -3,9 +3,11 @@
 	"version": "0.0.0",
 	"private": true,
 	"scripts": {
+		"build:wasm": "cargo build --manifest-path wasm/Cargo.toml --release --target wasm32-unknown-unknown && wasm-bindgen --target web --out-dir src/wasm wasm/target/wasm32-unknown-unknown/release/soliditas_wasm.wasm",
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
+		"pretest": "pnpm build:wasm",
 		"test": "vitest",
 		"cf-typegen": "wrangler types"
 	},
