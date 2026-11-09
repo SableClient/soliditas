@@ -26,7 +26,7 @@ import { MatrixWellKnownServer, SoliditasAddressConvertResponse } from './types'
 
 export default {
 	async fetch(request: { url: string | URL; }, env: {
-		SERVERNAME: any; HOSTNAME: any; PORT: any; 
+		SERVERNAME: any; HOSTNAME: any; PORT: any; KLIPY_API_KEY?: string;
 }, context: any) {
 		const url = new URL(request.url);
 		const serverName = env.SERVERNAME || url.hostname;
@@ -40,7 +40,7 @@ export default {
 			const mediaId = url.pathname.replace('/_matrix/federation/v1/media/download/', '');
 			return proxyMediaCall(mediaId);
 		} else if (url.pathname === '/_soliditas/preview_url') {
-			return previewUrl(url.searchParams.get('url'), serverName);
+			return previewUrl(url.searchParams.get('url'), serverName, env.KLIPY_API_KEY);
 		} else if (url.pathname === '/_soliditas/embed/youtube') {
 			return youtubeEmbed(url.searchParams);
 		} else if (url.pathname === '/_soliditas/adressconvert'){

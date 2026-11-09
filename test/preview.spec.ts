@@ -35,6 +35,33 @@ afterEach(() => {
 });
 
 describe('preview_url', () => {
+	it('previews Klipy links through the Klipy API only with a key', async () => {
+		const gif = 'https://static.klipy.com/ii/a/md.gif';
+		const fetch = serveRoutes({
+			'https://api.klipy.com/api/v1/klipy-key/gifs/items?slugs=greetings-PSr': () =>
+				json({
+					result: true,
+					data: { data: [{ slug: 'greetings-PSr', title: 'Greetings', file: { md: { gif: { url: gif, width: 640, height: 640 } } } }] },
+				}),
+		});
+		const target = encodeURIComponent('https://klipy.com/gifs/greetings-PSr');
+		const ask = (keyed: object) =>
+			worker.fetch({ url: `https://gifs.example/_soliditas/preview_url?url=${target}` }, { ...env, ...keyed }, {});
+
+		const response = await ask({ KLIPY_API_KEY: 'klipy-key' });
+		expect(await response.json()).toEqual({
+			'og:site_name': 'Klipy',
+			'og:title': 'Greetings',
+			'og:image': `mxc://gifs.example/${toMatrixID(gif, 'og_')}`,
+			'og:image:width': 640,
+			'og:image:height': 640,
+		});
+
+		fetch.mockClear();
+		expect((await ask({})).status).toBe(404);
+		expect(fetch).not.toHaveBeenCalled();
+	});
+
 	it('answers with the open graph tags and an mxc for the image', async () => {
 		servePage(`<html><head>
 			<meta property="og:title" content="A post">

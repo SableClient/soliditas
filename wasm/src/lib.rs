@@ -1,5 +1,5 @@
 use js_sys::{Function, Promise, Uint8Array};
-use sable_link_preview::{Fetch, Response, parse_public_url, scrape};
+use sable_link_preview::{Fetch, Response, ScrapeOptions, parse_public_url, scrape};
 use url::Url;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
@@ -86,9 +86,13 @@ pub fn parse_public(value: &str) -> Option<String> {
 }
 
 #[wasm_bindgen(js_name = scrapePreview)]
-pub async fn scrape_preview(target: String, to_mxc: Function) -> Option<String> {
+pub async fn scrape_preview(
+    target: String,
+    to_mxc: Function,
+    klipy_api_key: Option<String>,
+) -> Option<String> {
     let url = parse_public_url(&target, None)?;
-    let preview = scrape(&WorkerFetch, &url).await?;
+    let preview = scrape(&WorkerFetch, &url, &ScrapeOptions { klipy_api_key }).await?;
     let media = |url: &Url| {
         to_mxc
             .call1(&JsValue::NULL, &JsValue::from_str(url.as_str()))

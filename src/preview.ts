@@ -33,7 +33,7 @@ export function parsePublicUrl(value: string): URL | null {
 	return url === undefined ? null : new URL(url);
 }
 
-export async function previewUrl(target: string | null, serverName: string): Promise<Response> {
+export async function previewUrl(target: string | null, serverName: string, klipyApiKey?: string): Promise<Response> {
 	const url = target ? parsePublicUrl(target) : null;
 	if (!url) {
 		return new Response(JSON.stringify(matrixInvalidParam('url must be a public http(s) url')), {
@@ -42,7 +42,11 @@ export async function previewUrl(target: string | null, serverName: string): Pro
 		});
 	}
 
-	const preview = await scrapePreview(url.href, (media: string) => `mxc://${serverName}/${toMatrixID(media, 'og_')}`);
+	const preview = await scrapePreview(
+		url.href,
+		(media: string) => `mxc://${serverName}/${toMatrixID(media, 'og_')}`,
+		klipyApiKey,
+	);
 	if (preview === undefined) {
 		return new Response(JSON.stringify(matrixRessourceNotFound('no html preview for this url')), {
 			headers: CORS_HEADERS,

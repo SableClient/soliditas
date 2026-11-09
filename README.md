@@ -6,6 +6,7 @@ A matrix media proxy as cloudflare worker.
 
 - `HOSTNAME`: the hostname, for example `example.org`
 - `SERVERNAME`: the servername, for example `example.org`
+- `KLIPY_API_KEY` (optional secret): previews Klipy links through the [Klipy API](https://docs.klipy.com)
 
 ## Constructing media id
 
@@ -63,7 +64,7 @@ You need to generate a matrix id, using the algorithm as shown above.
 
 ## Link previews
 
-`GET /_soliditas/preview_url?url=[url]` answers in the shape of the Matrix `/preview_url` endpoint. Missing `og:` tags are filled from `twitter:` tags, `<title>`, `<meta name="description">` and oEmbed. Twitter/X links are read from the [FxTwitter API](https://github.com/FxEmbed/FxEmbed), Bluesky posts from their author's PDS, Reddit and TikTok titles from their oEmbed endpoints, Tumblr posts without an image get the [fxtumblr](https://github.com/knuxify/fxtumblr) render, and fediverse posts are read from their ActivityPub object.
+`GET /_soliditas/preview_url?url=[url]` answers in the shape of the Matrix `/preview_url` endpoint. Missing `og:` tags are filled from `twitter:` tags, `<title>`, `<meta name="description">` and oEmbed. Twitter/X links are read from the [FxTwitter API](https://github.com/FxEmbed/FxEmbed), Bluesky posts from their author's PDS, Reddit and TikTok titles from their oEmbed endpoints, Klipy GIFs, stickers and clips from the Klipy API, Tumblr posts without an image get the [fxtumblr](https://github.com/knuxify/fxtumblr) render, and fediverse posts are read from their ActivityPub object.
 
 The scraper is the Rust crate `sable-link-preview`, which the Sable client also runs natively. `wasm/` compiles it for the worker, and `pnpm build:wasm` (run before `test`, `dev` and `deploy`) needs Rust with the `wasm32-unknown-unknown` target and `wasm-bindgen-cli` 0.2.130.
 

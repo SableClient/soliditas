@@ -9,7 +9,7 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-sable-link-preview = { git = "https://git.sable.moe/SableClient/link-preview.git", rev = "5ee0cc1ded86fc765e10e2f6b9aa3490261c12c4", features = ["scrape"] }
+sable-link-preview = { git = "https://git.sable.moe/SableClient/link-preview.git", rev = "69f027992da8717d0f9485344d59ba4d0e2283b1", features = ["scrape"] }
 serde_json = "1"
 url = "2"
 wasm-bindgen = "=0.2.130"
