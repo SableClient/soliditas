@@ -8,6 +8,8 @@ A matrix media proxy as cloudflare worker.
 - `SERVERNAME`: the servername, for example `example.org`
 - `KLIPY_API_KEY` (optional secret): previews Klipy links through the [Klipy API](https://docs.klipy.com)
 
+The server in `server/` reads `SOLIDITAS_SERVER_NAME`, `SOLIDITAS_DELEGATE_HOST`, `SOLIDITAS_DELEGATE_PORT`, `SOLIDITAS_LISTEN` (default `[::]:8080`) and `KLIPY_API_KEY`. Containers set `HOSTNAME` to their own name, so the server does not read it.
+
 ## Constructing media id
 
 Example in TypeScript, as seen in `mxcId.ts`:
