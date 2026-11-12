@@ -124,6 +124,14 @@ async fn main() -> std::io::Result<()> {
         port: env("SOLIDITAS_DELEGATE_PORT"),
         previews: Previews::new(env("KLIPY_API_KEY")).map_err(std::io::Error::other)?,
     });
+    let cleanup = Arc::clone(&state);
+    tokio::spawn(async move {
+        let mut every = tokio::time::interval(std::time::Duration::from_secs(60));
+        loop {
+            every.tick().await;
+            cleanup.previews.forget_idle_clients();
+        }
+    });
     let listen = env("SOLIDITAS_LISTEN").unwrap_or_else(|| "[::]:8080".to_owned());
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     axum::serve(listener, router(state))

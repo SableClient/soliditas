@@ -307,3 +307,36 @@ async fn version_and_unknown_routes_answer_like_a_matrix_server() {
     assert_eq!(unknown.status, StatusCode::NOT_FOUND);
     assert_eq!(unknown.json()["errcode"], "M_UNRECOGNIZED");
 }
+
+async fn preview_from(app: &axum::Router, ip: &str, target: &str) -> StatusCode {
+    let query: String = url::form_urlencoded::byte_serialize(target.as_bytes()).collect();
+    app.clone()
+        .oneshot(
+            Request::get(format!("/_soliditas/preview_url?url={query}"))
+                .header("host", "gifs.example")
+                .header("x-real-ip", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn one_address_is_limited_without_slowing_another() {
+    let app = router(Arc::new(state()));
+    let mut refused = None;
+    for page in 0..40 {
+        let target = format!("https://nonexistent-{page}.invalid/");
+        if preview_from(&app, "203.0.113.7", &target).await == StatusCode::TOO_MANY_REQUESTS {
+            refused = Some(page);
+            break;
+        }
+    }
+    assert!(refused.is_some_and(|page| page >= 30), "{refused:?}");
+    assert_ne!(
+        preview_from(&app, "198.51.100.9", "https://nonexistent-other.invalid/").await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+}

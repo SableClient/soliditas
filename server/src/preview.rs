@@ -1,10 +1,13 @@
+use std::net::IpAddr;
+use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{RawQuery, State};
 use axum::http::header::{ACCESS_CONTROL_ALLOW_ORIGIN, CACHE_CONTROL, CONTENT_TYPE};
-use axum::http::{HeaderMap, HeaderValue, Uri};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
+use governor::{DefaultKeyedRateLimiter, Quota};
 use moka::future::Cache;
 use sable_link_preview::{ReqwestFetch, ScrapeOptions, parse_public_url, scrape};
 use tokio::sync::Semaphore;
@@ -22,11 +25,21 @@ const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 const MAX_CONCURRENT_SCRAPES: usize = 64;
 
+const SCRAPES_PER_MINUTE: NonZeroU32 = NonZeroU32::new(120).unwrap();
+
+const SCRAPE_BURST: NonZeroU32 = NonZeroU32::new(30).unwrap();
+
+enum Failure {
+    NoPreview,
+    Limited,
+}
+
 pub(crate) struct Previews {
     fetch: ReqwestFetch,
     options: ScrapeOptions,
     cache: Cache<String, Arc<str>>,
     scrapes: Semaphore,
+    per_ip: DefaultKeyedRateLimiter<IpAddr>,
 }
 
 impl Previews {
@@ -45,14 +58,39 @@ impl Previews {
                 .time_to_live(CACHE_TTL)
                 .build(),
             scrapes: Semaphore::new(MAX_CONCURRENT_SCRAPES),
+            per_ip: DefaultKeyedRateLimiter::dashmap(
+                Quota::per_minute(SCRAPES_PER_MINUTE).allow_burst(SCRAPE_BURST),
+            ),
         })
     }
 
-    async fn preview(&self, server_name: &str, url: &Url) -> Option<Arc<str>> {
+    pub(crate) fn forget_idle_clients(&self) {
+        self.per_ip.retain_recent();
+        self.per_ip.shrink_to_fit();
+    }
+
+    /// A cached preview is free. Only the client whose request starts a scrape is charged for it.
+    async fn preview(
+        &self,
+        server_name: &str,
+        url: &Url,
+        client: Option<IpAddr>,
+    ) -> Result<Arc<str>, Arc<Failure>> {
         self.cache
-            .optionally_get_with(format!("{server_name} {url}"), async {
-                let _permit = self.scrapes.acquire().await.ok()?;
-                let preview = scrape(&self.fetch, url, &self.options).await?;
+            .try_get_with(format!("{server_name} {url}"), async {
+                if let Some(client) = client
+                    && self.per_ip.check_key(&client).is_err()
+                {
+                    return Err(Failure::Limited);
+                }
+                let _permit = self
+                    .scrapes
+                    .acquire()
+                    .await
+                    .map_err(|_| Failure::NoPreview)?;
+                let preview = scrape(&self.fetch, url, &self.options)
+                    .await
+                    .ok_or(Failure::NoPreview)?;
                 let media = |media: &Url| {
                     format!(
                         "mxc://{server_name}/{}",
@@ -60,8 +98,8 @@ impl Previews {
                     )
                 };
                 serde_json::to_string(&preview.to_matrix(media))
-                    .ok()
                     .map(Arc::from)
+                    .map_err(|_| Failure::NoPreview)
             })
             .await
     }
@@ -78,8 +116,12 @@ pub(crate) async fn preview_url(
         return cors(matrix::invalid_param("url must be a public http(s) url"));
     };
     let server_name = state.server_name(&uri, &headers);
-    match state.previews.preview(&server_name, &url).await {
-        Some(preview) => (
+    let client = headers
+        .get("x-real-ip")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok());
+    match state.previews.preview(&server_name, &url, client).await {
+        Ok(preview) => (
             [
                 (CONTENT_TYPE, "application/json"),
                 (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
@@ -88,7 +130,14 @@ pub(crate) async fn preview_url(
             String::from(&*preview),
         )
             .into_response(),
-        None => cors(matrix::not_found("no html preview for this url")),
+        Err(failure) => match *failure {
+            Failure::NoPreview => cors(matrix::not_found("no html preview for this url")),
+            Failure::Limited => cors(matrix::error(
+                StatusCode::TOO_MANY_REQUESTS,
+                "M_LIMIT_EXCEEDED",
+                "Too many previews from this address",
+            )),
+        },
     }
 }
 
