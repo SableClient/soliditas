@@ -8,7 +8,7 @@ A matrix media proxy as cloudflare worker.
 - `SERVERNAME`: the servername, for example `example.org`
 - `KLIPY_API_KEY` (optional secret): previews Klipy links through the [Klipy API](https://docs.klipy.com)
 
-The server in `server/` reads `SOLIDITAS_SERVER_NAME`, `SOLIDITAS_DELEGATE_HOST`, `SOLIDITAS_DELEGATE_PORT`, `SOLIDITAS_LISTEN` (default `[::]:8080`), `KLIPY_API_KEY` and `SOLIDITAS_TICKET_KEY` (a base64url Ed25519 seed that turns on the preview tunnel and its tickets). Containers set `HOSTNAME` to their own name, so the server does not read it.
+The server in `server/` reads `SOLIDITAS_SERVER_NAME`, `SOLIDITAS_DELEGATE_HOST`, `SOLIDITAS_DELEGATE_PORT`, `SOLIDITAS_LISTEN` (default `[::]:8080`), `SOLIDITAS_METRICS_LISTEN` (default `[::]:9090`, serves `/metrics` on its own port so it is not public), `KLIPY_API_KEY` and `SOLIDITAS_TICKET_KEY` (a base64url Ed25519 seed that turns on the preview tunnel and its tickets). Containers set `HOSTNAME` to their own name, so the server does not read it.
 
 ## Constructing media id
 

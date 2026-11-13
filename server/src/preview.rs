@@ -13,6 +13,7 @@ use sable_link_preview::{ReqwestFetch, ScrapeOptions, parse_public_url, scrape};
 use tokio::sync::Semaphore;
 use url::Url;
 
+use crate::metrics::Metrics;
 use crate::mxc::to_matrix_id;
 use crate::{AppState, matrix, query_param};
 
@@ -64,6 +65,14 @@ impl Previews {
         })
     }
 
+    pub(crate) fn scrapes_in_flight(&self) -> u64 {
+        (MAX_CONCURRENT_SCRAPES - self.scrapes.available_permits()) as u64
+    }
+
+    pub(crate) fn cached(&self) -> u64 {
+        self.cache.entry_count()
+    }
+
     pub(crate) fn forget_idle_clients(&self) {
         self.per_ip.retain_recent();
         self.per_ip.shrink_to_fit();
@@ -75,6 +84,7 @@ impl Previews {
         server_name: &str,
         url: &Url,
         client: Option<IpAddr>,
+        metrics: &Metrics,
     ) -> Result<Arc<str>, Arc<Failure>> {
         self.cache
             .try_get_with(format!("{server_name} {url}"), async {
@@ -88,6 +98,7 @@ impl Previews {
                     .acquire()
                     .await
                     .map_err(|_| Failure::NoPreview)?;
+                metrics.scrapes.inc();
                 let preview = scrape(&self.fetch, url, &self.options)
                     .await
                     .ok_or(Failure::NoPreview)?;
@@ -113,6 +124,7 @@ pub(crate) async fn preview_url(
 ) -> Response {
     let target = query_param(query.as_deref(), "url");
     let Some(url) = target.and_then(|target| parse_public_url(&target, None)) else {
+        state.metrics.previews_invalid.inc();
         return cors(matrix::invalid_param("url must be a public http(s) url"));
     };
     let server_name = state.server_name(&uri, &headers);
@@ -120,23 +132,37 @@ pub(crate) async fn preview_url(
         .get("x-real-ip")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse().ok());
-    match state.previews.preview(&server_name, &url, client).await {
-        Ok(preview) => (
-            [
-                (CONTENT_TYPE, "application/json"),
-                (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
-                (CACHE_CONTROL, "public, max-age=86400"),
-            ],
-            String::from(&*preview),
-        )
-            .into_response(),
+    let metrics = &state.metrics;
+    match state
+        .previews
+        .preview(&server_name, &url, client, metrics)
+        .await
+    {
+        Ok(preview) => {
+            metrics.previews_served.inc();
+            (
+                [
+                    (CONTENT_TYPE, "application/json"),
+                    (ACCESS_CONTROL_ALLOW_ORIGIN, "*"),
+                    (CACHE_CONTROL, "public, max-age=86400"),
+                ],
+                String::from(&*preview),
+            )
+                .into_response()
+        }
         Err(failure) => match *failure {
-            Failure::NoPreview => cors(matrix::not_found("no html preview for this url")),
-            Failure::Limited => cors(matrix::error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "M_LIMIT_EXCEEDED",
-                "Too many previews from this address",
-            )),
+            Failure::NoPreview => {
+                metrics.previews_missing.inc();
+                cors(matrix::not_found("no html preview for this url"))
+            }
+            Failure::Limited => {
+                metrics.previews_limited.inc();
+                cors(matrix::error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "M_LIMIT_EXCEEDED",
+                    "Too many previews from this address",
+                ))
+            }
         },
     }
 }

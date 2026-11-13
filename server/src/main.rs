@@ -1,5 +1,6 @@
 mod matrix;
 mod media;
+mod metrics;
 mod mxc;
 mod preview;
 mod ticket;
@@ -16,6 +17,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 
+use crate::metrics::Metrics;
 use crate::mxc::to_matrix_id;
 use crate::preview::Previews;
 use crate::ticket::Tickets;
@@ -28,6 +30,7 @@ pub(crate) struct AppState {
     previews: Previews,
     tickets: Tickets,
     tunnels: Tunnels,
+    metrics: Metrics,
 }
 
 impl AppState {
@@ -134,6 +137,7 @@ async fn main() -> std::io::Result<()> {
         tickets: Tickets::new(env("SOLIDITAS_TICKET_KEY").as_deref())
             .map_err(std::io::Error::other)?,
         tunnels: Tunnels::new(),
+        metrics: Metrics::default(),
     });
     let cleanup = Arc::clone(&state);
     tokio::spawn(async move {
@@ -145,6 +149,12 @@ async fn main() -> std::io::Result<()> {
             cleanup.tunnels.forget_idle_clients();
         }
     });
+    let metrics_listen = env("SOLIDITAS_METRICS_LISTEN").unwrap_or_else(|| "[::]:9090".to_owned());
+    let metrics_listener = tokio::net::TcpListener::bind(&metrics_listen).await?;
+    let metrics = Router::new()
+        .route("/metrics", get(metrics::metrics))
+        .with_state(Arc::clone(&state));
+    tokio::spawn(async move { axum::serve(metrics_listener, metrics).await });
     let listen = env("SOLIDITAS_LISTEN").unwrap_or_else(|| "[::]:8080".to_owned());
     let listener = tokio::net::TcpListener::bind(&listen).await?;
     axum::serve(listener, router(state))

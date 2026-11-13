@@ -299,6 +299,7 @@ pub(crate) async fn tunnel_ticket(
         .and_then(|value| value.parse().ok())
         && tickets.per_ip.check_key(&client).is_err()
     {
+        state.metrics.tickets_limited.inc();
         return matrix::error(
             StatusCode::TOO_MANY_REQUESTS,
             "M_LIMIT_EXCEEDED",
@@ -306,18 +307,22 @@ pub(crate) async fn tunnel_ticket(
         );
     }
     let Some(request) = body.ok().and_then(|Json(body)| TicketRequest::parse(&body)) else {
+        state.metrics.tickets_invalid.inc();
         return matrix::invalid_param("expected access_token and matrix_server_name");
     };
     if parse_server_name(&request.matrix_server_name).is_none() {
+        state.metrics.tickets_invalid.inc();
         return matrix::invalid_param("matrix_server_name is not a Matrix server name");
     }
     if !tickets.is_verified(&request).await {
+        state.metrics.tickets_rejected.inc();
         return matrix::error(
             StatusCode::UNAUTHORIZED,
             "M_UNAUTHORIZED",
             "The homeserver did not accept this access token",
         );
     }
+    state.metrics.tickets_issued.inc();
     Json(json!({
         "ticket": issue(key, SystemTime::now()),
         "expires_in_ms": TICKET_TTL.as_millis(),

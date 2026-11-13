@@ -14,6 +14,10 @@ use tokio::net::TcpStream;
 
 use crate::{AppState, matrix, query_param};
 
+/// The client offers this and its ticket as WebSocket subprotocols, since a browser
+/// cannot set other headers and a URL ends up in logs.
+const PROTOCOL: &str = "sable-tunnel";
+
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
 const IDLE_TIMEOUT: Duration = Duration::from_secs(20);
@@ -83,7 +87,12 @@ pub(crate) async fn tunnel(
     upgrade: WebSocketUpgrade,
 ) -> Response {
     let query = query.as_deref();
-    if !query_param(query, "ticket").is_some_and(|ticket| state.tickets.accepts(&ticket)) {
+    let ticket = upgrade
+        .requested_protocols()
+        .filter_map(|protocol| protocol.to_str().ok())
+        .find(|protocol| *protocol != PROTOCOL);
+    if !ticket.is_some_and(|ticket| state.tickets.accepts(ticket)) {
+        state.metrics.tunnels_unauthorized.inc();
         return matrix::error(
             StatusCode::UNAUTHORIZED,
             "M_UNAUTHORIZED",
@@ -96,6 +105,7 @@ pub(crate) async fn tunnel(
         .and_then(|value| value.parse().ok())
         && state.tunnels.per_ip.check_key(&client).is_err()
     {
+        state.metrics.tunnels_limited.inc();
         return matrix::error(
             StatusCode::TOO_MANY_REQUESTS,
             "M_LIMIT_EXCEEDED",
@@ -103,9 +113,11 @@ pub(crate) async fn tunnel(
         );
     }
     let Some((host, port)) = target(query) else {
+        state.metrics.tunnels_invalid.inc();
         return matrix::invalid_param("host must be a public host name and port 80 or 443");
     };
     let Some(origin) = connect(&host, port).await else {
+        state.metrics.tunnels_unreachable.inc();
         return matrix::error(
             StatusCode::BAD_GATEWAY,
             "M_UNKNOWN",
@@ -113,11 +125,14 @@ pub(crate) async fn tunnel(
         );
     };
     upgrade
+        .protocols([PROTOCOL])
         .max_message_size(MAX_UPLOAD_BYTES)
-        .on_upgrade(move |socket| relay(socket, origin))
+        .on_upgrade(move |socket| relay(socket, origin, state))
 }
 
-async fn relay(mut socket: WebSocket, mut origin: TcpStream) {
+async fn relay(mut socket: WebSocket, mut origin: TcpStream, state: Arc<AppState>) {
+    let metrics = &state.metrics;
+    metrics.tunnels_opened.inc();
     let mut uploaded = 0;
     let mut downloaded = 0;
     let mut chunk = vec![0; 16 * 1024];
@@ -132,6 +147,7 @@ async fn relay(mut socket: WebSocket, mut origin: TcpStream) {
         match step {
             Ok(Step::FromClient(Some(Ok(Message::Binary(data))))) => {
                 uploaded += data.len();
+                metrics.tunnel_bytes_up.add(data.len());
                 if uploaded > MAX_UPLOAD_BYTES || origin.write_all(&data).await.is_err() {
                     break;
                 }
@@ -139,6 +155,7 @@ async fn relay(mut socket: WebSocket, mut origin: TcpStream) {
             Ok(Step::FromClient(Some(Ok(Message::Ping(_) | Message::Pong(_))))) => {}
             Ok(Step::FromOrigin(Ok(read))) if read > 0 => {
                 downloaded += read;
+                metrics.tunnel_bytes_down.add(read);
                 let Some(data) = chunk.get(..read) else {
                     break;
                 };
@@ -155,6 +172,7 @@ async fn relay(mut socket: WebSocket, mut origin: TcpStream) {
         }
     }
     let _ = socket.send(Message::Close(None)).await;
+    metrics.tunnels_closed.inc();
 }
 
 enum Step {

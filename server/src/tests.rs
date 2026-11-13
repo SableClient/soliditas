@@ -49,6 +49,7 @@ pub(crate) fn state() -> AppState {
         previews: Previews::new(None).unwrap(),
         tickets: Tickets::new(None).unwrap(),
         tunnels: crate::tunnel::Tunnels::new(),
+        metrics: crate::metrics::Metrics::default(),
     }
 }
 
@@ -342,4 +343,31 @@ async fn one_address_is_limited_without_slowing_another() {
         preview_from(&app, "198.51.100.9", "https://nonexistent-other.invalid/").await,
         StatusCode::TOO_MANY_REQUESTS
     );
+}
+
+#[tokio::test]
+async fn metrics_count_requests_by_result() {
+    let state = Arc::new(state());
+    let app = router(Arc::clone(&state));
+    for uri in [
+        "/_soliditas/preview_url",
+        "/_soliditas/preview_url?url=https%3A%2F%2Fnonexistent-metrics.invalid%2F",
+    ] {
+        let request = Request::get(uri)
+            .header("host", "gifs.example")
+            .body(Body::empty())
+            .unwrap();
+        app.clone().oneshot(request).await.unwrap();
+    }
+    let text = crate::metrics::render(&state);
+    for line in [
+        "soliditas_preview_requests_total{result=\"invalid\"} 1",
+        "soliditas_preview_requests_total{result=\"missing\"} 1",
+        "soliditas_preview_requests_total{result=\"served\"} 0",
+        "soliditas_scrapes_total 1",
+        "soliditas_scrapes_in_flight 0",
+        "soliditas_tunnels_open 0",
+    ] {
+        assert!(text.lines().any(|have| have == line), "{line}\n{text}");
+    }
 }
