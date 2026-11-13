@@ -47,6 +47,7 @@ pub(crate) fn state() -> AppState {
         hostname: None,
         port: None,
         previews: Previews::new(None).unwrap(),
+        providers: crate::provider::Providers::new().unwrap(),
         tickets: Tickets::new(None).unwrap(),
         tunnels: crate::tunnel::Tunnels::new(),
         metrics: crate::metrics::Metrics::default(),

@@ -20,7 +20,7 @@ use sha2::{Digest, Sha256};
 use url::Url;
 
 use crate::mxc::BASE64URL;
-use crate::{AppState, matrix};
+use crate::{AppState, client_ip, matrix};
 
 const AUDIENCE: &str = "sable-preview-tunnel";
 
@@ -293,10 +293,7 @@ pub(crate) async fn tunnel_ticket(
     let Some(key) = &tickets.signing else {
         return unrecognized();
     };
-    if let Some(client) = headers
-        .get("x-real-ip")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok())
+    if let Some(client) = client_ip(&headers)
         && tickets.per_ip.check_key(&client).is_err()
     {
         state.metrics.tickets_limited.inc();

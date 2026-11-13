@@ -12,7 +12,7 @@ use sable_link_preview::{is_public_address, parse_public_url};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-use crate::{AppState, matrix, query_param};
+use crate::{AppState, client_ip, matrix, query_param};
 
 /// The client offers this and its ticket as WebSocket subprotocols, since a browser
 /// cannot set other headers and a URL ends up in logs.
@@ -99,10 +99,7 @@ pub(crate) async fn tunnel(
             "A valid ticket is required",
         );
     }
-    if let Some(client) = headers
-        .get("x-real-ip")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok())
+    if let Some(client) = client_ip(&headers)
         && state.tunnels.per_ip.check_key(&client).is_err()
     {
         state.metrics.tunnels_limited.inc();

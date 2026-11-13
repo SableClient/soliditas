@@ -32,6 +32,11 @@ pub(crate) struct Metrics {
     pub(crate) previews_limited: Counter,
     pub(crate) previews_invalid: Counter,
     pub(crate) scrapes: Counter,
+    pub(crate) provider_served: Counter,
+    pub(crate) provider_missing: Counter,
+    pub(crate) provider_limited: Counter,
+    pub(crate) provider_invalid: Counter,
+    pub(crate) provider_fetches: Counter,
     pub(crate) tickets_issued: Counter,
     pub(crate) tickets_rejected: Counter,
     pub(crate) tickets_limited: Counter,
@@ -92,6 +97,32 @@ pub(crate) fn render(state: &AppState) -> String {
         "gauge",
         "",
         &[("", state.previews.cached())],
+    );
+    family(
+        &mut out,
+        "soliditas_provider_requests_total",
+        "counter",
+        "result",
+        &[
+            ("served", m.provider_served.get()),
+            ("missing", m.provider_missing.get()),
+            ("limited", m.provider_limited.get()),
+            ("invalid", m.provider_invalid.get()),
+        ],
+    );
+    family(
+        &mut out,
+        "soliditas_provider_fetches_total",
+        "counter",
+        "",
+        &[("", m.provider_fetches.get())],
+    );
+    family(
+        &mut out,
+        "soliditas_provider_cache_entries",
+        "gauge",
+        "",
+        &[("", state.providers.cached())],
     );
     family(
         &mut out,

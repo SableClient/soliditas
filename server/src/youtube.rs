@@ -1,9 +1,13 @@
-use axum::extract::RawQuery;
-use axum::http::StatusCode;
-use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY};
-use axum::response::{IntoResponse, Response};
+use std::sync::Arc;
 
-use crate::query_param;
+use axum::extract::{RawQuery, State};
+use axum::http::header::{CACHE_CONTROL, CONTENT_SECURITY_POLICY, CONTENT_TYPE, REFERRER_POLICY};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use url::Url;
+
+use crate::provider::{self, Kind};
+use crate::{AppState, client_ip, query_param};
 
 fn is_video_id(id: &str) -> bool {
     id.len() == 11
@@ -52,4 +56,116 @@ pub(crate) async fn embed(RawQuery(query): RawQuery) -> Response {
 
 fn invalid() -> Response {
     (StatusCode::BAD_REQUEST, "Invalid video or start time").into_response()
+}
+
+fn video(query: Option<&str>) -> Option<String> {
+    query_param(query, "v").filter(|id| is_video_id(id))
+}
+
+pub(crate) fn details_url(id: &str) -> Url {
+    let mut url = Url::parse("https://www.youtube.com/oembed?format=json").expect("a constant url");
+    url.query_pairs_mut()
+        .append_pair("url", &format!("https://www.youtube.com/watch?v={id}"));
+    url
+}
+
+pub(crate) fn dearrow_url(id: &str) -> Url {
+    let mut url = Url::parse("https://sponsor.ajay.app/api/branding").expect("a constant url");
+    url.query_pairs_mut()
+        .append_pair("videoID", id)
+        .append_pair("service", "YouTube")
+        .append_pair("fetchAll", "false");
+    url
+}
+
+pub(crate) fn frame_url(id: &str, frame: Option<&str>) -> Option<Url> {
+    let file = match frame {
+        None => "hqdefault",
+        Some("start") => "hq1",
+        Some("middle") => "hq2",
+        Some("end") => "hq3",
+        Some(_) => return None,
+    };
+    Url::parse(&format!("https://i.ytimg.com/vi/{id}/{file}.jpg")).ok()
+}
+
+pub(crate) fn dearrow_frame_url(id: &str, time: &str) -> Option<Url> {
+    time.parse::<f64>()
+        .ok()
+        .filter(|time| time.is_finite() && *time >= 0.0)?;
+    let mut url =
+        Url::parse("https://dearrow-thumb.ajay.app/api/v1/getThumbnail").expect("a constant url");
+    url.query_pairs_mut()
+        .append_pair("videoID", id)
+        .append_pair("time", time);
+    Some(url)
+}
+
+pub(crate) async fn details(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    lookup(&state, &headers, query.as_deref(), details_url).await
+}
+
+pub(crate) async fn dearrow(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    lookup(&state, &headers, query.as_deref(), dearrow_url).await
+}
+
+async fn lookup(
+    state: &AppState,
+    headers: &HeaderMap,
+    query: Option<&str>,
+    url: fn(&str) -> Url,
+) -> Response {
+    let Some(id) = video(query) else {
+        return provider::invalid(&state.metrics, "v must be a YouTube video id");
+    };
+    let found = state
+        .providers
+        .get(&url(&id), Kind::Json, client_ip(headers), &state.metrics)
+        .await;
+    provider::answer(found, &state.metrics)
+}
+
+/// With `time`, DeArrow renders that moment of the video, and the YouTube frame stands in when
+/// it has not rendered it yet.
+pub(crate) async fn thumbnail(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    RawQuery(query): RawQuery,
+) -> Response {
+    let query = query.as_deref();
+    let frame = query_param(query, "frame");
+    let Some(id) = video(query) else {
+        return provider::invalid(&state.metrics, "v must be a YouTube video id");
+    };
+    let Some(frame) = frame_url(&id, frame.as_deref()) else {
+        return provider::invalid(&state.metrics, "frame must be start, middle or end");
+    };
+    let rendered = match query_param(query, "time") {
+        Some(time) => match dearrow_frame_url(&id, &time) {
+            Some(url) => Some(url),
+            None => return provider::invalid(&state.metrics, "time must be a moment in seconds"),
+        },
+        None => None,
+    };
+    let client = client_ip(&headers);
+    let providers = &state.providers;
+    if let Some(rendered) = rendered
+        && let Ok(found) = providers
+            .get(&rendered, Kind::Image, client, &state.metrics)
+            .await
+    {
+        return provider::answer(Ok(found), &state.metrics);
+    }
+    let found = providers
+        .get(&frame, Kind::Image, client, &state.metrics)
+        .await;
+    provider::answer(found, &state.metrics)
 }

@@ -15,7 +15,7 @@ use url::Url;
 
 use crate::metrics::Metrics;
 use crate::mxc::to_matrix_id;
-use crate::{AppState, matrix, query_param};
+use crate::{AppState, client_ip, matrix, query_param};
 
 const USER_AGENT: &str =
     "Soliditas (bot; +https://github.com/SableClient/soliditas) facebookexternalhit/1.1";
@@ -128,10 +128,7 @@ pub(crate) async fn preview_url(
         return cors(matrix::invalid_param("url must be a public http(s) url"));
     };
     let server_name = state.server_name(&uri, &headers);
-    let client = headers
-        .get("x-real-ip")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.parse().ok());
+    let client = client_ip(&headers);
     let metrics = &state.metrics;
     match state
         .previews

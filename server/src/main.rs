@@ -1,9 +1,12 @@
+mod gifs;
 mod matrix;
 mod media;
 mod metrics;
 mod mxc;
 mod preview;
+mod provider;
 mod ticket;
+mod tiktok;
 mod tunnel;
 mod youtube;
 
@@ -20,6 +23,7 @@ use serde_json::json;
 use crate::metrics::Metrics;
 use crate::mxc::to_matrix_id;
 use crate::preview::Previews;
+use crate::provider::Providers;
 use crate::ticket::Tickets;
 use crate::tunnel::Tunnels;
 
@@ -28,6 +32,7 @@ pub(crate) struct AppState {
     hostname: Option<String>,
     port: Option<String>,
     previews: Previews,
+    providers: Providers,
     tickets: Tickets,
     tunnels: Tunnels,
     metrics: Metrics,
@@ -53,6 +58,13 @@ fn request_host(uri: &Uri, headers: &HeaderMap) -> (String, Option<u16>) {
             || (String::new(), None),
             |authority| (authority.host().to_owned(), authority.port_u16()),
         )
+}
+
+pub(crate) fn client_ip(headers: &HeaderMap) -> Option<std::net::IpAddr> {
+    headers
+        .get("x-real-ip")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse().ok())
 }
 
 pub(crate) fn query_param(query: Option<&str>, name: &str) -> Option<String> {
@@ -107,6 +119,15 @@ fn router(state: Arc<AppState>) -> Router {
         .route("/_soliditas/tunnel_ticket", post(ticket::tunnel_ticket))
         .route("/_soliditas/tunnel", get(tunnel::tunnel))
         .route("/_soliditas/embed/youtube", get(youtube::embed))
+        .route("/_soliditas/embed/youtube/details", get(youtube::details))
+        .route("/_soliditas/embed/youtube/dearrow", get(youtube::dearrow))
+        .route(
+            "/_soliditas/embed/youtube/thumbnail",
+            get(youtube::thumbnail),
+        )
+        .route("/_soliditas/embed/tiktok", get(tiktok::lookup))
+        .route("/_soliditas/gifs/search", get(gifs::search))
+        .route("/_soliditas/gifs/media", get(gifs::media))
         .route("/_soliditas/adressconvert", get(address_convert))
         .route("/.well-known/matrix/server", get(well_known))
         .route("/livez", get(|| async { "ok" }))
@@ -134,6 +155,7 @@ async fn main() -> std::io::Result<()> {
         hostname: env("SOLIDITAS_DELEGATE_HOST"),
         port: env("SOLIDITAS_DELEGATE_PORT"),
         previews: Previews::new(env("KLIPY_API_KEY")).map_err(std::io::Error::other)?,
+        providers: Providers::new().map_err(std::io::Error::other)?,
         tickets: Tickets::new(env("SOLIDITAS_TICKET_KEY").as_deref())
             .map_err(std::io::Error::other)?,
         tunnels: Tunnels::new(),
@@ -145,6 +167,7 @@ async fn main() -> std::io::Result<()> {
         loop {
             every.tick().await;
             cleanup.previews.forget_idle_clients();
+            cleanup.providers.forget_idle_clients();
             cleanup.tickets.forget_idle_clients();
             cleanup.tunnels.forget_idle_clients();
         }
