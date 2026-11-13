@@ -331,15 +331,23 @@ async fn preview_from(app: &axum::Router, ip: &str, target: &str) -> StatusCode 
 #[tokio::test]
 async fn one_address_is_limited_without_slowing_another() {
     let app = router(Arc::new(state()));
-    let mut refused = None;
-    for page in 0..40 {
-        let target = format!("https://nonexistent-{page}.invalid/");
-        if preview_from(&app, "203.0.113.7", &target).await == StatusCode::TOO_MANY_REQUESTS {
-            refused = Some(page);
-            break;
+    // Sent together, so the allowance cannot refill while a slow lookup is pending.
+    let pages: Vec<_> = (0..40)
+        .map(|page| {
+            let app = app.clone();
+            tokio::spawn(async move {
+                let target = format!("https://nonexistent-{page}.invalid/");
+                preview_from(&app, "203.0.113.7", &target).await
+            })
+        })
+        .collect();
+    let mut refused = 0;
+    for page in pages {
+        if page.await.unwrap() == StatusCode::TOO_MANY_REQUESTS {
+            refused += 1;
         }
     }
-    assert!(refused.is_some_and(|page| page >= 30), "{refused:?}");
+    assert!((1..=10).contains(&refused), "{refused}");
     assert_ne!(
         preview_from(&app, "198.51.100.9", "https://nonexistent-other.invalid/").await,
         StatusCode::TOO_MANY_REQUESTS
