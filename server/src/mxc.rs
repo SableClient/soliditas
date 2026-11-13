@@ -3,7 +3,7 @@ use base64::alphabet::URL_SAFE;
 use base64::engine::DecodePaddingMode;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 
-const BASE64URL: GeneralPurpose = GeneralPurpose::new(
+pub(crate) const BASE64URL: GeneralPurpose = GeneralPurpose::new(
     &URL_SAFE,
     GeneralPurposeConfig::new()
         .with_encode_padding(false)

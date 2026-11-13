@@ -7,6 +7,7 @@ use tower::ServiceExt as _;
 
 use crate::mxc::{from_matrix_id, to_matrix_id};
 use crate::preview::Previews;
+use crate::ticket::Tickets;
 use crate::{AppState, router};
 
 struct Answer {
@@ -40,12 +41,14 @@ async fn get_with(state: AppState, uri: &str) -> Answer {
     }
 }
 
-fn state() -> AppState {
+pub(crate) fn state() -> AppState {
     AppState {
         server_name: None,
         hostname: None,
         port: None,
         previews: Previews::new(None).unwrap(),
+        tickets: Tickets::new(None).unwrap(),
+        tunnels: crate::tunnel::Tunnels::new(),
     }
 }
 

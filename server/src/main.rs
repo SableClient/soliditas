@@ -2,6 +2,8 @@ mod matrix;
 mod media;
 mod mxc;
 mod preview;
+mod ticket;
+mod tunnel;
 mod youtube;
 
 use std::sync::Arc;
@@ -10,18 +12,22 @@ use axum::extract::{RawQuery, State};
 use axum::http::header::HOST;
 use axum::http::{HeaderMap, Uri};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::json;
 
 use crate::mxc::to_matrix_id;
 use crate::preview::Previews;
+use crate::ticket::Tickets;
+use crate::tunnel::Tunnels;
 
 pub(crate) struct AppState {
     server_name: Option<String>,
     hostname: Option<String>,
     port: Option<String>,
     previews: Previews,
+    tickets: Tickets,
+    tunnels: Tunnels,
 }
 
 impl AppState {
@@ -95,6 +101,8 @@ fn router(state: Arc<AppState>) -> Router {
             get(media::download),
         )
         .route("/_soliditas/preview_url", get(preview::preview_url))
+        .route("/_soliditas/tunnel_ticket", post(ticket::tunnel_ticket))
+        .route("/_soliditas/tunnel", get(tunnel::tunnel))
         .route("/_soliditas/embed/youtube", get(youtube::embed))
         .route("/_soliditas/adressconvert", get(address_convert))
         .route("/.well-known/matrix/server", get(well_known))
@@ -123,6 +131,9 @@ async fn main() -> std::io::Result<()> {
         hostname: env("SOLIDITAS_DELEGATE_HOST"),
         port: env("SOLIDITAS_DELEGATE_PORT"),
         previews: Previews::new(env("KLIPY_API_KEY")).map_err(std::io::Error::other)?,
+        tickets: Tickets::new(env("SOLIDITAS_TICKET_KEY").as_deref())
+            .map_err(std::io::Error::other)?,
+        tunnels: Tunnels::new(),
     });
     let cleanup = Arc::clone(&state);
     tokio::spawn(async move {
@@ -130,6 +141,8 @@ async fn main() -> std::io::Result<()> {
         loop {
             every.tick().await;
             cleanup.previews.forget_idle_clients();
+            cleanup.tickets.forget_idle_clients();
+            cleanup.tunnels.forget_idle_clients();
         }
     });
     let listen = env("SOLIDITAS_LISTEN").unwrap_or_else(|| "[::]:8080".to_owned());
