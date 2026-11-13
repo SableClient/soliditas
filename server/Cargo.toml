@@ -12,7 +12,7 @@ ed25519-dalek = "3.0.0"
 governor = { version = "0.10.4", default-features = false, features = ["std", "dashmap", "quanta"] }
 moka = { version = "0.12.16", features = ["future"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "http2", "charset", "gzip"] }
-sable-link-preview = { git = "https://git.sable.moe/SableClient/link-preview.git", rev = "fb6304894e9ba85f8b58a75f63a5c35d6ef53817", features = ["reqwest"] }
+sable-link-preview = { git = "https://git.sable.moe/SableClient/link-preview.git", rev = "bd282133151b69a42b4816887877496cdb84e106", features = ["reqwest"] }
 serde_json = "1"
 sha2 = "0.11.1"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }

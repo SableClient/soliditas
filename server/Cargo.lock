@@ -1939,7 +1939,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 [[package]]
 name = "sable-link-preview"
 version = "0.1.0"
-source = "git+https://git.sable.moe/SableClient/link-preview.git?rev=fb6304894e9ba85f8b58a75f63a5c35d6ef53817#fb6304894e9ba85f8b58a75f63a5c35d6ef53817"
+source = "git+https://git.sable.moe/SableClient/link-preview.git?rev=bd282133151b69a42b4816887877496cdb84e106#bd282133151b69a42b4816887877496cdb84e106"
 dependencies = [
  "futures-util",
  "lol_html",
